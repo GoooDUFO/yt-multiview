@@ -243,6 +243,27 @@
     justify-content: center;
   }
   .tile.playing .close-btn { display: flex; }
+  .tile .sound-btn {
+    position: absolute;
+    top: 4px;
+    right: 34px;
+    z-index: 5;
+    width: 26px;
+    height: 26px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(0,0,0,.65);
+    color: #fff;
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+  }
+  /* iOS only plays one audible video at a time, so tiles get a speaker
+     toggle there to pick which one carries the sound */
+  body.ios .tile.playing .sound-btn { display: flex; }
 
   /* ---- settings modal ---- */
   #settings-overlay {
@@ -365,6 +386,14 @@ var tileVideo = [null, null, null, null]; // current video id per tile
 var ytReady = false;
 var pendingLoads = []; // videos chosen before the YT API finished loading
 
+// iOS/iPadOS WebKit pauses every other video the moment an unmuted video
+// starts playing (one-audible-element-per-page policy; Android has no such
+// rule). Muted videos are exempt, so on iOS every tile starts muted and
+// exactly one tile — audioTile — is allowed to carry sound.
+var IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+             (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+var audioTile = -1; // iOS: index of the tile with sound, -1 = all muted
+
 var DEFAULT_INSTANCE = 'https://invidious.tiekoetter.com';
 function adFreeOn() { return localStorage.getItem('adFree') !== '0'; } // default ON
 function invInstance() {
@@ -419,6 +448,7 @@ for (var i = 0; i < N_TILES; i++) {
       '</div>' +
     '</div>' +
     '<div class="player-view"><div class="player-slot" id="player-slot-' + i + '"></div></div>' +
+    '<button class="sound-btn" aria-label="Toggle sound">🔇</button>' +
     '<button class="close-btn" aria-label="Close video">✕</button>';
   grid.appendChild(tile);
 
@@ -429,6 +459,7 @@ for (var i = 0; i < N_TILES; i++) {
     goBtn.addEventListener('click', submit);
     input.addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(); });
     $('.close-btn', tile).addEventListener('click', function () { closeVideo(idx); });
+    $('.sound-btn', tile).addEventListener('click', function () { setAudioTile(idx); });
   })(tile, i);
 }
 function tileEl(idx) { return grid.children[idx]; }
@@ -498,6 +529,10 @@ function renderResults(idx, items) {
 function loadVideo(idx, videoId) {
   tileEl(idx).classList.add('playing');
   tileVideo[idx] = videoId;
+  // iOS: the first tile to load a video gets the sound; later tiles start
+  // muted so starting them doesn't pause the ones already playing.
+  if (IS_IOS && audioTile === -1) audioTile = idx;
+  updateSoundButtons();
   if (adFreeOn()) { loadInvidious(idx, videoId, false); return; }
   loadYouTube(idx, videoId);
 }
@@ -512,7 +547,12 @@ function loadInvidious(idx, videoId, autoplay) {
   f.id = 'player-slot-' + idx;
   f.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
   f.setAttribute('allowfullscreen', '');
-  f.src = invInstance() + '/embed/' + videoId + (autoplay ? '?autoplay=1' : '');
+  var params = [];
+  if (autoplay) params.push('autoplay=1');
+  // Invidious accepts preference overrides in the URL; volume=0 keeps
+  // non-audio tiles muted so iOS lets them all play at once.
+  if (IS_IOS) params.push('volume=' + (idx === audioTile ? 100 : 0));
+  f.src = invInstance() + '/embed/' + videoId + (params.length ? '?' + params.join('&') : '');
   // destroySlot left an empty slot div with this id — take its place
   document.getElementById('player-slot-' + idx).replaceWith(f);
   tileMode[idx] = 'inv';
@@ -528,6 +568,7 @@ function loadYouTube(idx, videoId) {
 
   if (players[idx] && tileMode[idx] === 'yt') {
     players[idx].loadVideoById(videoId);
+    applyYtMute(idx);
     loaded[idx] = true;
     return;
   }
@@ -543,9 +584,47 @@ function loadYouTube(idx, videoId) {
       origin: location.origin
     },
     events: {
-      onReady: function () { loaded[idx] = true; }
+      onReady: function () { loaded[idx] = true; applyYtMute(idx); }
     }
   });
+}
+
+// iOS: mute every YouTube tile except the one holding the sound
+function applyYtMute(idx) {
+  if (!IS_IOS || !players[idx]) return;
+  try {
+    if (idx === audioTile) players[idx].unMute();
+    else players[idx].mute();
+  } catch (e) {}
+}
+
+// iOS: move the sound to tile idx (tap the speaking tile again to mute all).
+// YouTube tiles switch silently via the API; Invidious embeds expose no JS
+// control, so the affected ad-free tiles reload with the new volume.
+function setAudioTile(idx) {
+  if (!IS_IOS) return;
+  var prev = audioTile;
+  audioTile = (idx === audioTile) ? -1 : idx;
+  var invReloaded = false;
+  for (var i = 0; i < N_TILES; i++) {
+    if (!loaded[i]) continue;
+    if (tileMode[i] === 'yt') {
+      applyYtMute(i);
+    } else if (i === audioTile || i === prev) {
+      loadInvidious(i, tileVideo[i], true);
+      invReloaded = true;
+    }
+  }
+  updateSoundButtons();
+  if (invReloaded) toast('Ad-free tiles restart when sound is switched');
+}
+
+function updateSoundButtons() {
+  if (!IS_IOS) return;
+  for (var i = 0; i < N_TILES; i++) {
+    var b = $('.sound-btn', tileEl(i));
+    if (b) b.textContent = (i === audioTile) ? '🔊' : '🔇';
+  }
 }
 
 // Remove whatever occupies the tile's player slot (YT player or Invidious
@@ -569,6 +648,7 @@ function closeVideo(idx) {
   destroySlot(idx);
   tileVideo[idx] = null;
   tileEl(idx).classList.remove('playing');
+  if (idx === audioTile) { audioTile = -1; updateSoundButtons(); }
 }
 
 // Run fn for every loaded tile; fn(idx, mode). Returns count.
@@ -654,6 +734,7 @@ $('#settings-overlay').addEventListener('click', function (e) {
 
 /* ---------- misc ---------- */
 refreshBadge();
+if (IS_IOS) document.body.classList.add('ios');
 // Try to lock landscape where supported (installed PWA on Android)
 if (screen.orientation && screen.orientation.lock) {
   screen.orientation.lock('landscape').catch(function () {});
