@@ -15,6 +15,16 @@ Watch four YouTube videos at once in a 2×2 grid, with synced playback.
 - **↻ Sync** – restart all videos from 0:00 at the same moment
 - Installable as a home-screen app (PWA); locks to landscape on Android
 
+## Sound on iPhone / iPad
+
+iOS only allows **one video with sound** to play at a time — starting a second
+unmuted video would pause the first (that's a WebKit rule, not something the
+app can lift). So on iOS all tiles play muted except one: the first video you
+load gets the sound, and every playing tile shows a speaker button (🔊/🔇) —
+tap it to move the sound to that tile, or tap the active one to mute
+everything. In ad-free mode, switching sound restarts the affected tiles,
+since the Invidious player can't be controlled from outside.
+
 ## Add to your phone's home screen
 
 - **iPhone:** open the link in Safari → Share → *Add to Home Screen* (rotate the phone for landscape)
