@@ -1,6 +1,6 @@
 // Minimal service worker: network-first for the app shell, so updates land
 // immediately but the app still opens offline-cached UI if the network is down.
-var CACHE = 'yt-multiview-v1';
+var CACHE = 'yt-multiview-v2';
 var SHELL = ['index.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', function (e) {

@@ -56,6 +56,19 @@
     white-space: nowrap;
   }
   #topbar .brand span { color: var(--red); }
+  #adfree-badge {
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: .5px;
+    color: #4cd964;
+    border: 1px solid #4cd964;
+    border-radius: 5px;
+    padding: 2px 5px;
+    margin-right: 2px;
+    white-space: nowrap;
+    display: none;
+  }
+  body.adfree #adfree-badge { display: inline-block; }
   .bar-btn {
     border: none;
     border-radius: 8px;
@@ -262,7 +275,7 @@
   }
   #settings ol { padding-left: 18px; }
   #settings a { color: var(--accent); }
-  #settings input {
+  #settings input[type="text"] {
     width: 100%;
     background: var(--panel2);
     border: 1px solid #3a3a3e;
@@ -273,6 +286,17 @@
     outline: none;
     margin-bottom: 12px;
   }
+  #settings .check-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13.5px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    cursor: pointer;
+  }
+  #settings .check-row input { width: 17px; height: 17px; accent-color: #4cd964; }
+  #settings hr { border: none; border-top: 1px solid #3a3a3e; margin: 14px 0; }
   #settings .row { display: flex; gap: 8px; justify-content: flex-end; }
 
   /* toast */
@@ -297,6 +321,7 @@
 
 <div id="topbar">
   <div class="brand">YT <span>Multi</span>View</div>
+  <span id="adfree-badge">AD-FREE</span>
   <button class="bar-btn primary" id="btn-play-all" title="Play all loaded videos together">▶ All</button>
   <button class="bar-btn" id="btn-pause-all" title="Pause all">⏸ All</button>
   <button class="bar-btn" id="btn-restart-all" title="Restart all from 0:00 in sync">↻ Sync</button>
@@ -316,6 +341,10 @@
       <li>Copy the key and paste it below. It's stored only on this device.</li>
     </ol>
     <input type="text" id="api-key-input" placeholder="Paste API key here" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <hr>
+    <label class="check-row"><input type="checkbox" id="adfree-toggle"> Ad-free player</label>
+    <p>Plays videos through a public Invidious server instead of YouTube's player — <b style="color:var(--text)">no ads at all</b>. Trade-offs: it relies on a volunteer-run server (if videos stop loading, turn this off or change the server below), and <b style="color:var(--text)">⏸ All doesn't work</b> in this mode — pause each video with its own controls. ▶ All restarts all tiles together from 0:00.</p>
+    <input type="text" id="inv-instance-input" placeholder="https://invidious.tiekoetter.com" autocomplete="off" autocapitalize="off" spellcheck="false">
     <div class="row">
       <button class="bar-btn" id="btn-settings-close">Close</button>
       <button class="bar-btn primary" id="btn-settings-save">Save</button>
@@ -329,10 +358,19 @@
 "use strict";
 
 var N_TILES = 4;
-var players = [null, null, null, null];   // YT.Player instances
+var players = [null, null, null, null];   // YT.Player instances (official mode)
 var loaded  = [false, false, false, false]; // player exists & video cued
+var tileMode = [null, null, null, null];  // 'yt' | 'inv' per tile
+var tileVideo = [null, null, null, null]; // current video id per tile
 var ytReady = false;
 var pendingLoads = []; // videos chosen before the YT API finished loading
+
+var DEFAULT_INSTANCE = 'https://invidious.tiekoetter.com';
+function adFreeOn() { return localStorage.getItem('adFree') !== '0'; } // default ON
+function invInstance() {
+  return (localStorage.getItem('invInstance') || DEFAULT_INSTANCE).replace(/\/+$/, '');
+}
+function refreshBadge() { document.body.classList.toggle('adfree', adFreeOn()); }
 
 /* ---------- utils ---------- */
 function $(sel, el) { return (el || document).querySelector(sel); }
@@ -459,13 +497,42 @@ function renderResults(idx, items) {
 /* ---------- players ---------- */
 function loadVideo(idx, videoId) {
   tileEl(idx).classList.add('playing');
+  tileVideo[idx] = videoId;
+  if (adFreeOn()) { loadInvidious(idx, videoId, false); return; }
+  loadYouTube(idx, videoId);
+}
+
+// Ad-free mode: iframe the Invidious embed page. No JS control from here
+// (cross-origin, no postMessage API), so play/sync is done by reloading
+// the iframe with autoplay=1 — see invRestart().
+function loadInvidious(idx, videoId, autoplay) {
+  destroySlot(idx);
+  var f = document.createElement('iframe');
+  f.className = 'player-slot';
+  f.id = 'player-slot-' + idx;
+  f.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
+  f.setAttribute('allowfullscreen', '');
+  f.src = invInstance() + '/embed/' + videoId + (autoplay ? '?autoplay=1' : '');
+  // destroySlot left an empty slot div with this id — take its place
+  document.getElementById('player-slot-' + idx).replaceWith(f);
+  tileMode[idx] = 'inv';
+  loaded[idx] = true;
+}
+
+function invRestart(idx) {
+  loadInvidious(idx, tileVideo[idx], true);
+}
+
+function loadYouTube(idx, videoId) {
   if (!ytReady) { pendingLoads.push([idx, videoId]); return; }
 
-  if (players[idx]) {
+  if (players[idx] && tileMode[idx] === 'yt') {
     players[idx].loadVideoById(videoId);
     loaded[idx] = true;
     return;
   }
+  destroySlot(idx);
+  tileMode[idx] = 'yt';
   players[idx] = new YT.Player('player-slot-' + idx, {
     videoId: videoId,
     playerVars: {
@@ -481,38 +548,57 @@ function loadVideo(idx, videoId) {
   });
 }
 
-function closeVideo(idx) {
+// Remove whatever occupies the tile's player slot (YT player or Invidious
+// iframe) and leave a fresh empty slot div in place.
+function destroySlot(idx) {
   if (players[idx]) {
     try { players[idx].destroy(); } catch (e) {}
     players[idx] = null;
-    // destroy() removes the slot div; recreate it for next time
-    var slot = document.createElement('div');
-    slot.className = 'player-slot';
-    slot.id = 'player-slot-' + idx;
-    $('.player-view', tileEl(idx)).appendChild(slot);
   }
+  var old = document.getElementById('player-slot-' + idx);
+  if (old) old.remove();
+  var slot = document.createElement('div');
+  slot.className = 'player-slot';
+  slot.id = 'player-slot-' + idx;
+  $('.player-view', tileEl(idx)).appendChild(slot);
+  tileMode[idx] = null;
   loaded[idx] = false;
+}
+
+function closeVideo(idx) {
+  destroySlot(idx);
+  tileVideo[idx] = null;
   tileEl(idx).classList.remove('playing');
 }
 
-function eachPlayer(fn) {
+// Run fn for every loaded tile; fn(idx, mode). Returns count.
+function eachLoaded(fn) {
   var n = 0;
   for (var i = 0; i < N_TILES; i++) {
-    if (players[i] && loaded[i]) { fn(players[i]); n++; }
+    if (loaded[i]) { fn(i, tileMode[i]); n++; }
   }
   return n;
 }
 
 $('#btn-play-all').addEventListener('click', function () {
-  var n = eachPlayer(function (p) { try { p.playVideo(); } catch (e) {} });
+  var n = eachLoaded(function (i, mode) {
+    if (mode === 'yt') { try { players[i].playVideo(); } catch (e) {} }
+    else invRestart(i); // no remote control for Invidious embeds: restart from 0 together
+  });
   if (!n) toast('Load a video in a tile first');
 });
 $('#btn-pause-all').addEventListener('click', function () {
-  eachPlayer(function (p) { try { p.pauseVideo(); } catch (e) {} });
+  var invCount = 0;
+  eachLoaded(function (i, mode) {
+    if (mode === 'yt') { try { players[i].pauseVideo(); } catch (e) {} }
+    else invCount++;
+  });
+  if (invCount) toast('Ad-free tiles can only be paused with their own controls');
 });
 $('#btn-restart-all').addEventListener('click', function () {
-  var n = eachPlayer(function (p) {
-    try { p.seekTo(0, true); p.playVideo(); } catch (e) {}
+  var n = eachLoaded(function (i, mode) {
+    if (mode === 'yt') { try { players[i].seekTo(0, true); players[i].playVideo(); } catch (e) {} }
+    else invRestart(i);
   });
   if (n) toast('Restarted ' + n + ' video' + (n > 1 ? 's' : '') + ' in sync');
   else toast('Load a video in a tile first');
@@ -533,6 +619,8 @@ window.onYouTubeIframeAPIReady = function () {
 /* ---------- settings ---------- */
 function openSettings() {
   $('#api-key-input').value = getApiKey();
+  $('#adfree-toggle').checked = adFreeOn();
+  $('#inv-instance-input').value = localStorage.getItem('invInstance') || DEFAULT_INSTANCE;
   $('#settings-overlay').classList.add('open');
 }
 $('#btn-settings').addEventListener('click', openSettings);
@@ -541,8 +629,23 @@ $('#btn-settings-close').addEventListener('click', function () {
 });
 $('#btn-settings-save').addEventListener('click', function () {
   var v = $('#api-key-input').value.trim();
-  if (v) { localStorage.setItem('ytApiKey', v); toast('API key saved ✓'); }
-  else { localStorage.removeItem('ytApiKey'); toast('API key removed'); }
+  if (v) localStorage.setItem('ytApiKey', v);
+  else localStorage.removeItem('ytApiKey');
+
+  var wasAdFree = adFreeOn();
+  localStorage.setItem('adFree', $('#adfree-toggle').checked ? '1' : '0');
+  var inst = $('#inv-instance-input').value.trim().replace(/\/+$/, '');
+  if (inst && inst !== DEFAULT_INSTANCE) localStorage.setItem('invInstance', inst);
+  else localStorage.removeItem('invInstance');
+  refreshBadge();
+
+  // Re-load open tiles so the new player mode takes effect immediately
+  if (wasAdFree !== adFreeOn()) {
+    for (var i = 0; i < N_TILES; i++) {
+      if (tileVideo[i]) loadVideo(i, tileVideo[i]);
+    }
+  }
+  toast('Settings saved ✓');
   $('#settings-overlay').classList.remove('open');
 });
 $('#settings-overlay').addEventListener('click', function (e) {
@@ -550,6 +653,7 @@ $('#settings-overlay').addEventListener('click', function (e) {
 });
 
 /* ---------- misc ---------- */
+refreshBadge();
 // Try to lock landscape where supported (installed PWA on Android)
 if (screen.orientation && screen.orientation.lock) {
   screen.orientation.lock('landscape').catch(function () {});
