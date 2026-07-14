@@ -264,6 +264,18 @@
   /* iOS only plays one audible video at a time, so tiles get a speaker
      toggle there to pick which one carries the sound */
   body.ios .tile.playing .sound-btn { display: flex; }
+  .sound-btn.pending { opacity: .55; }
+  #mix-block { display: none; }
+  body.ios #mix-block { display: block; }
+  .beta-tag {
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: .5px;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 5px;
+    padding: 1px 4px;
+  }
 
   /* ---- settings modal ---- */
   #settings-overlay {
@@ -366,6 +378,11 @@
     <label class="check-row"><input type="checkbox" id="adfree-toggle"> Ad-free player</label>
     <p>Plays videos through a public Invidious server instead of YouTube's player — <b style="color:var(--text)">no ads at all</b>. Trade-offs: it relies on a volunteer-run server (if videos stop loading, turn this off or change the server below), and <b style="color:var(--text)">⏸ All doesn't work</b> in this mode — pause each video with its own controls. ▶ All restarts all tiles together from 0:00.</p>
     <input type="text" id="inv-instance-input" placeholder="https://invidious.tiekoetter.com" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <div id="mix-block">
+      <hr>
+      <label class="check-row"><input type="checkbox" id="mix-toggle"> Mixed audio <span class="beta-tag">iOS BETA</span></label>
+      <p>iOS normally allows sound from only one video. This mode fetches a separate audio track for each video from a public Piped/Invidious server and mixes them on this device, so <b style="color:var(--text)">all tiles can be heard at once</b> — tap a tile's 🔊 to mute just that one. If no audio server responds, the tile falls back to the single-sound speaker toggle. Works in the normal YouTube player mode (not ad-free mode).</p>
+    </div>
     <div class="row">
       <button class="bar-btn" id="btn-settings-close">Close</button>
       <button class="bar-btn primary" id="btn-settings-save">Save</button>
@@ -568,41 +585,57 @@ function loadYouTube(idx, videoId) {
 
   if (players[idx] && tileMode[idx] === 'yt') {
     players[idx].loadVideoById(videoId);
-    applyYtMute(idx);
     loaded[idx] = true;
-    return;
+  } else {
+    destroySlot(idx); // also detaches any mixed track, so attach comes after
+    tileMode[idx] = 'yt';
+    players[idx] = new YT.Player('player-slot-' + idx, {
+      videoId: videoId,
+      playerVars: {
+        playsinline: 1,
+        rel: 0,
+        modestbranding: 1,
+        enablejsapi: 1,
+        origin: location.origin
+      },
+      events: {
+        onReady: function () { loaded[idx] = true; applyYtMute(idx); }
+      }
+    });
   }
-  destroySlot(idx);
-  tileMode[idx] = 'yt';
-  players[idx] = new YT.Player('player-slot-' + idx, {
-    videoId: videoId,
-    playerVars: {
-      playsinline: 1,
-      rel: 0,
-      modestbranding: 1,
-      enablejsapi: 1,
-      origin: location.origin
-    },
-    events: {
-      onReady: function () { loaded[idx] = true; applyYtMute(idx); }
-    }
-  });
+  if (mixEnabled()) mixAttach(idx, videoId);
+  else mixDetach(idx);
+  applyYtMute(idx);
 }
 
-// iOS: mute every YouTube tile except the one holding the sound
+// iOS: a tile's YouTube player carries native sound only when it is the
+// exclusive audio tile AND has no mixed track — mixed tiles stay muted,
+// their sound comes from the Web Audio mix instead.
 function applyYtMute(idx) {
   if (!IS_IOS || !players[idx]) return;
+  var m = mix[idx];
+  var native = idx === audioTile && (!m || m.failed);
   try {
-    if (idx === audioTile) players[idx].unMute();
+    if (native) players[idx].unMute();
     else players[idx].mute();
   } catch (e) {}
 }
 
-// iOS: move the sound to tile idx (tap the speaking tile again to mute all).
-// YouTube tiles switch silently via the API; Invidious embeds expose no JS
-// control, so the affected ad-free tiles reload with the new volume.
+// iOS speaker button. Mixed-audio tiles mute/unmute independently; tiles
+// without a mixed track fall back to exclusive single-sound mode (one tile
+// with native audio at a time — iOS pauses the rest otherwise). Invidious
+// embeds expose no JS control, so affected ad-free tiles reload.
 function setAudioTile(idx) {
   if (!IS_IOS) return;
+  var m = mix[idx];
+  if (m && m.ready) {
+    m.muted = !m.muted;
+    applyMixVolume(idx);
+    if (!m.muted) mixKick(idx); // the tap doubles as the unlock gesture
+    updateSoundButtons();
+    return;
+  }
+  if (m && !m.failed) { toast('Fetching audio track…'); return; }
   var prev = audioTile;
   audioTile = (idx === audioTile) ? -1 : idx;
   var invReloaded = false;
@@ -623,13 +656,234 @@ function updateSoundButtons() {
   if (!IS_IOS) return;
   for (var i = 0; i < N_TILES; i++) {
     var b = $('.sound-btn', tileEl(i));
-    if (b) b.textContent = (i === audioTile) ? '🔊' : '🔇';
+    if (!b) continue;
+    var m = mix[i];
+    b.classList.toggle('pending', !!(m && !m.ready && !m.failed));
+    if (m && m.ready) b.textContent = m.muted ? '🔇' : '🔊';
+    else b.textContent = (i === audioTile) ? '🔊' : '🔇';
   }
+}
+
+/* ---------- iOS mixed-audio engine ----------
+   iOS allows only one audible <video>/<audio> element at a time, but sound
+   routed through a single Web Audio context counts as one output. So each
+   tile's YouTube player stays muted (picture only) while an audio-only
+   track of the same video — fetched from a public Piped/Invidious API —
+   plays through a shared AudioContext with a per-tile gain node. A 500ms
+   loop keeps each track locked to its player's clock, and pauses it while
+   the player isn't advancing (paused, buffering, or showing an ad). */
+var PIPED_APIS = [
+  'https://pipedapi.kavin.rocks',
+  'https://pipedapi.adminforge.de',
+  'https://api.piped.private.coffee'
+];
+var mix = [null, null, null, null]; // {el,gain,ready,failed,unlocked,muted,lastT,stalled}
+var mixCtx = null;
+var mixTimer = null;
+
+function mixEnabled() { return IS_IOS && localStorage.getItem('mixAudio') !== '0'; } // default ON on iOS
+
+function mixContext() {
+  if (!mixCtx) {
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    mixCtx = new AC();
+  }
+  if (mixCtx.state === 'suspended') { try { mixCtx.resume(); } catch (e) {} }
+  return mixCtx;
+}
+
+function fetchJson(url, ms) {
+  return new Promise(function (resolve, reject) {
+    if (!window.fetch) { reject(new Error('no fetch')); return; }
+    var ctl = window.AbortController ? new AbortController() : null;
+    var timer = setTimeout(function () {
+      if (ctl) ctl.abort();
+      reject(new Error('timeout'));
+    }, ms);
+    fetch(url, ctl ? { signal: ctl.signal } : undefined)
+      .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function (j) { clearTimeout(timer); resolve(j); },
+            function (e) { clearTimeout(timer); reject(e); });
+  });
+}
+
+// Highest-bitrate AAC stream; iOS Safari can't decode Opus/WebM audio.
+// Handles both Piped entries (mimeType) and Invidious entries (type).
+function pickAacUrl(list) {
+  var best = null, bestBr = -1;
+  (list || []).forEach(function (s) {
+    var type = s.mimeType || s.type || '';
+    if (type.indexOf('audio/mp4') !== 0 || !s.url) return;
+    var br = parseInt(s.bitrate, 10) || 0;
+    if (br > bestBr) { bestBr = br; best = s.url; }
+  });
+  return best;
+}
+
+// localStorage 'audioApis' (comma-separated Piped API bases) lets users
+// point at their own instances; the defaults are tried after those.
+function audioApiBases() {
+  var extra = (localStorage.getItem('audioApis') || '').split(',')
+    .map(function (s) { return s.trim().replace(/\/+$/, ''); })
+    .filter(Boolean);
+  return extra.concat(PIPED_APIS);
+}
+
+// Try Piped APIs first (plain JSON, CORS enabled, pre-proxied stream URLs),
+// then Invidious (?local=true proxies the stream through the instance so
+// the URL is fetchable from the browser).
+function resolveAudioUrl(videoId) {
+  var piped = audioApiBases();
+  var invs = [invInstance(), DEFAULT_INSTANCE].filter(function (v, i, a) {
+    return a.indexOf(v) === i;
+  });
+  function tryPiped(i) {
+    if (i >= piped.length) return tryInv(0);
+    return fetchJson(piped[i] + '/streams/' + videoId, 6000).then(function (j) {
+      return pickAacUrl(j.audioStreams) || tryPiped(i + 1);
+    }, function () { return tryPiped(i + 1); });
+  }
+  function tryInv(i) {
+    if (i >= invs.length) return Promise.reject(new Error('no audio source reachable'));
+    return fetchJson(invs[i] + '/api/v1/videos/' + videoId + '?fields=adaptiveFormats&local=true', 6000)
+      .then(function (j) {
+        return pickAacUrl(j.adaptiveFormats) || tryInv(i + 1);
+      }, function () { return tryInv(i + 1); });
+  }
+  return tryPiped(0);
+}
+
+function mixAttach(idx, videoId) {
+  mixDetach(idx);
+  var m = { el: null, gain: null, ready: false, failed: false,
+            unlocked: false, muted: false, lastT: -1, stalled: 0 };
+  mix[idx] = m;
+  updateSoundButtons();
+  resolveAudioUrl(videoId).then(function (url) {
+    if (mix[idx] !== m || tileVideo[idx] !== videoId) return; // tile moved on
+    var el = document.createElement('audio');
+    el.crossOrigin = 'anonymous';
+    el.preload = 'auto';
+    el.src = url;
+    el.onerror = function () {
+      if (mix[idx] !== m) return;
+      m.ready = false;
+      m.failed = true;
+      updateSoundButtons();
+      applyYtMute(idx);
+    };
+    m.el = el;
+    var ctx = mixContext();
+    if (ctx) {
+      try {
+        var src = ctx.createMediaElementSource(el);
+        m.gain = ctx.createGain();
+        src.connect(m.gain);
+        m.gain.connect(ctx.destination);
+      } catch (e) { m.gain = null; }
+    }
+    m.ready = true;
+    updateSoundButtons();
+    startMixLoop();
+  }, function () {
+    if (mix[idx] !== m) return;
+    m.failed = true;
+    updateSoundButtons();
+    applyYtMute(idx);
+    toast('Tile ' + (idx + 1) + ': no audio server reachable — 🔇 works in single-sound mode');
+  });
+}
+
+function mixDetach(idx) {
+  var m = mix[idx];
+  if (!m) return;
+  mix[idx] = null;
+  if (m.el) {
+    try { m.el.pause(); } catch (e) {}
+    m.el.onerror = null;
+    m.el.removeAttribute('src');
+    try { m.el.load(); } catch (e) {}
+  }
+  if (m.gain) { try { m.gain.disconnect(); } catch (e) {} }
+}
+
+function applyMixVolume(idx) {
+  var m = mix[idx];
+  if (!m) return;
+  if (m.gain) m.gain.gain.value = m.muted ? 0 : 1;
+  else if (m.el) m.el.muted = m.muted; // no Web Audio: element plays directly
+}
+
+// Start a tile's track inside a user gesture. iOS lets scripts control a
+// media element only after one gesture-initiated play(), so this also
+// serves as the per-element unlock; if the video isn't actually playing,
+// the track is paused again right away and the sync loop takes over.
+function mixKick(idx) {
+  var m = mix[idx];
+  if (!m || !m.ready || !m.el) return;
+  var p = m.el.play();
+  if (p && p.then) p.then(function () {
+    m.unlocked = true;
+    var st = -1;
+    try { st = players[idx] ? players[idx].getPlayerState() : -1; } catch (e) {}
+    if (st !== 1) m.el.pause();
+  }, function () {});
+}
+
+function mixUnlock() {
+  if (mixCtx && mixCtx.state === 'suspended') { try { mixCtx.resume(); } catch (e) {} }
+  for (var i = 0; i < N_TILES; i++) {
+    var m = mix[i];
+    if (m && m.ready && !m.unlocked) mixKick(i);
+  }
+}
+document.addEventListener('touchend', mixUnlock, true);
+document.addEventListener('click', mixUnlock, true);
+
+function startMixLoop() {
+  if (!mixTimer) mixTimer = setInterval(mixTick, 500);
+}
+function mixTick() {
+  var any = false;
+  for (var i = 0; i < N_TILES; i++) {
+    var m = mix[i];
+    if (m) any = true;
+    if (!m || !m.ready || !m.el || !players[i] || tileMode[i] !== 'yt') continue;
+    var st = -1, t = 0;
+    try {
+      st = players[i].getPlayerState();
+      t = players[i].getCurrentTime() || 0;
+    } catch (e) { continue; }
+    // "Playing" but the clock isn't moving = ad or buffering; hold the audio.
+    var advancing = Math.abs(t - m.lastT) >= 0.05;
+    if (st === 1 && !advancing) m.stalled++;
+    else m.stalled = 0;
+    m.lastT = t;
+    if (st === 1 && m.stalled < 2) {
+      if (Math.abs(m.el.currentTime - t) > 0.4) {
+        // only seek into a range the element can actually reach, else the
+        // browser clamps the seek and this would retry (and stutter) forever
+        try {
+          var sk = m.el.seekable;
+          if (sk.length && sk.end(sk.length - 1) >= t && sk.start(0) <= t) m.el.currentTime = t;
+        } catch (e) {}
+      }
+      if (m.el.paused) {
+        var p = m.el.play();
+        if (p && p.catch) p.catch(function () {});
+      }
+    } else if (!m.el.paused) {
+      m.el.pause();
+    }
+  }
+  if (!any && mixTimer) { clearInterval(mixTimer); mixTimer = null; }
 }
 
 // Remove whatever occupies the tile's player slot (YT player or Invidious
 // iframe) and leave a fresh empty slot div in place.
 function destroySlot(idx) {
+  mixDetach(idx);
   if (players[idx]) {
     try { players[idx].destroy(); } catch (e) {}
     players[idx] = null;
@@ -662,7 +916,10 @@ function eachLoaded(fn) {
 
 $('#btn-play-all').addEventListener('click', function () {
   var n = eachLoaded(function (i, mode) {
-    if (mode === 'yt') { try { players[i].playVideo(); } catch (e) {} }
+    if (mode === 'yt') {
+      try { players[i].playVideo(); } catch (e) {}
+      mixKick(i);
+    }
     else invRestart(i); // no remote control for Invidious embeds: restart from 0 together
   });
   if (!n) toast('Load a video in a tile first');
@@ -670,14 +927,21 @@ $('#btn-play-all').addEventListener('click', function () {
 $('#btn-pause-all').addEventListener('click', function () {
   var invCount = 0;
   eachLoaded(function (i, mode) {
-    if (mode === 'yt') { try { players[i].pauseVideo(); } catch (e) {} }
+    if (mode === 'yt') {
+      try { players[i].pauseVideo(); } catch (e) {}
+      if (mix[i] && mix[i].el) { try { mix[i].el.pause(); } catch (e) {} }
+    }
     else invCount++;
   });
   if (invCount) toast('Ad-free tiles can only be paused with their own controls');
 });
 $('#btn-restart-all').addEventListener('click', function () {
   var n = eachLoaded(function (i, mode) {
-    if (mode === 'yt') { try { players[i].seekTo(0, true); players[i].playVideo(); } catch (e) {} }
+    if (mode === 'yt') {
+      try { players[i].seekTo(0, true); players[i].playVideo(); } catch (e) {}
+      if (mix[i] && mix[i].el) { try { mix[i].el.currentTime = 0; } catch (e) {} }
+      mixKick(i);
+    }
     else invRestart(i);
   });
   if (n) toast('Restarted ' + n + ' video' + (n > 1 ? 's' : '') + ' in sync');
@@ -701,6 +965,7 @@ function openSettings() {
   $('#api-key-input').value = getApiKey();
   $('#adfree-toggle').checked = adFreeOn();
   $('#inv-instance-input').value = localStorage.getItem('invInstance') || DEFAULT_INSTANCE;
+  $('#mix-toggle').checked = localStorage.getItem('mixAudio') !== '0';
   $('#settings-overlay').classList.add('open');
 }
 $('#btn-settings').addEventListener('click', openSettings);
@@ -713,14 +978,16 @@ $('#btn-settings-save').addEventListener('click', function () {
   else localStorage.removeItem('ytApiKey');
 
   var wasAdFree = adFreeOn();
+  var wasMix = mixEnabled();
   localStorage.setItem('adFree', $('#adfree-toggle').checked ? '1' : '0');
+  localStorage.setItem('mixAudio', $('#mix-toggle').checked ? '1' : '0');
   var inst = $('#inv-instance-input').value.trim().replace(/\/+$/, '');
   if (inst && inst !== DEFAULT_INSTANCE) localStorage.setItem('invInstance', inst);
   else localStorage.removeItem('invInstance');
   refreshBadge();
 
   // Re-load open tiles so the new player mode takes effect immediately
-  if (wasAdFree !== adFreeOn()) {
+  if (wasAdFree !== adFreeOn() || wasMix !== mixEnabled()) {
     for (var i = 0; i < N_TILES; i++) {
       if (tileVideo[i]) loadVideo(i, tileVideo[i]);
     }
