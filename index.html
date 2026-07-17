@@ -12,6 +12,9 @@
 <meta name="apple-mobile-web-app-title" content="MultiView">
 <link rel="apple-touch-icon" href="icon-192.png">
 <link rel="icon" href="icon-192.png">
+<link rel="preconnect" href="https://www.youtube.com">
+<link rel="preconnect" href="https://i.ytimg.com">
+<link rel="preconnect" href="https://www.googleapis.com">
 <style>
   :root {
     --bg: #0f0f0f;
@@ -93,6 +96,20 @@
     flex-direction: column;
     min-height: 0;
     min-width: 0;
+    /* isolate each tile's layout/paint work so one busy player can't
+       force the browser to re-render its neighbours */
+    contain: layout paint style;
+  }
+  /* 2×2 (default): tiles 5-6 hidden. 2×3: three columns in landscape,
+     three rows in portrait. */
+  .tile:nth-child(n+5) { display: none; }
+  body.grid6 #grid { grid-template-columns: 1fr 1fr 1fr; }
+  body.grid6 .tile:nth-child(n+5) { display: flex; }
+  @media (orientation: portrait) {
+    body.grid6 #grid {
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr 1fr 1fr;
+    }
   }
 
   /* search view inside a tile */
@@ -321,6 +338,7 @@
   <button class="bar-btn primary" id="btn-play-all" title="Play all loaded videos together">▶ All</button>
   <button class="bar-btn" id="btn-pause-all" title="Pause all">⏸ All</button>
   <button class="bar-btn" id="btn-restart-all" title="Restart all from 0:00 in sync">↻ Sync</button>
+  <button class="bar-btn" id="btn-grid" title="Toggle 2×2 / 2×3 layout">⊞ 2×2</button>
   <div class="spacer"></div>
   <button class="bar-btn" id="btn-settings" title="Settings">⚙</button>
 </div>
@@ -349,9 +367,9 @@
 <script>
 "use strict";
 
-var N_TILES = 4;
-var players = [null, null, null, null];   // YT.Player instances
-var loaded  = [false, false, false, false]; // player exists & video cued
+var N_TILES = 6; // grid shows 4 (2×2) or all 6 (2×3)
+var players = [null, null, null, null, null, null];   // YT.Player instances
+var loaded  = [false, false, false, false, false, false]; // player exists & video cued
 var ytReady = false;
 var pendingLoads = []; // videos chosen before the YT API finished loading
 
@@ -469,7 +487,7 @@ function renderResults(idx, items) {
     box.innerHTML = '<div class="hint">No results.</div>';
     return;
   }
-  box.innerHTML = '';
+  var frag = document.createDocumentFragment();
   items.forEach(function (it) {
     if (!it.id || !it.id.videoId) return;
     var sn = it.snippet;
@@ -477,14 +495,16 @@ function renderResults(idx, items) {
     row.className = 'result';
     var thumb = (sn.thumbnails && (sn.thumbnails.medium || sn.thumbnails.default)) || null;
     row.innerHTML =
-      '<img loading="lazy" src="' + (thumb ? thumb.url : '') + '" alt="">' +
+      '<img loading="lazy" decoding="async" src="' + (thumb ? thumb.url : '') + '" alt="">' +
       '<div class="meta">' +
         '<div class="title">' + escapeHtml(decodeEntities(sn.title)) + '</div>' +
         '<div class="channel">' + escapeHtml(decodeEntities(sn.channelTitle)) + '</div>' +
       '</div>';
     row.addEventListener('click', function () { loadVideo(idx, it.id.videoId); });
-    box.appendChild(row);
+    frag.appendChild(row);
   });
+  box.innerHTML = '';
+  box.appendChild(frag);
 }
 
 /* ---------- players ---------- */
@@ -508,11 +528,18 @@ function loadVideo(idx, videoId) {
       playsinline: 1,
       rel: 0,
       modestbranding: 1,
+      iv_load_policy: 3, // no annotation overlays — less rendering work per tile
       enablejsapi: 1,
       origin: location.origin
     },
     events: {
-      onReady: function () { loaded[idx] = true; applyYtMute(idx); }
+      onReady: function () { loaded[idx] = true; applyYtMute(idx); },
+      onError: function () {
+        // dead/unembeddable video: free the tile instead of leaving a
+        // black player that looks like a freeze
+        toast('That video can’t be played here — try another');
+        closeVideo(idx);
+      }
     }
   });
 }
@@ -582,6 +609,27 @@ $('#btn-restart-all').addEventListener('click', function () {
   else toast('Load a video in a tile first');
 });
 
+/* ---------- 2×2 / 2×3 layout ---------- */
+function grid6On() { return localStorage.getItem('grid6') === '1'; }
+function applyGridMode() {
+  document.body.classList.toggle('grid6', grid6On());
+  $('#btn-grid').textContent = grid6On() ? '⊞ 2×3' : '⊞ 2×2';
+}
+$('#btn-grid').addEventListener('click', function () {
+  var to6 = !grid6On();
+  if (!to6) {
+    // going back to 2×2: close tiles 5-6 so hidden videos don't keep
+    // playing audio and burning decoder/network resources
+    var closed = 0;
+    for (var i = 4; i < N_TILES; i++) {
+      if (loaded[i] || tileEl(i).classList.contains('playing')) { closeVideo(i); closed++; }
+    }
+    if (closed) toast('Closed ' + closed + ' hidden tile' + (closed > 1 ? 's' : ''));
+  }
+  localStorage.setItem('grid6', to6 ? '1' : '0');
+  applyGridMode();
+});
+
 /* YT IFrame API */
 window.onYouTubeIframeAPIReady = function () {
   ytReady = true;
@@ -615,6 +663,7 @@ $('#settings-overlay').addEventListener('click', function (e) {
 
 /* ---------- misc ---------- */
 if (IS_IOS) document.body.classList.add('ios');
+applyGridMode();
 // Settings from retired player modes (Invidious ad-free, mixed audio)
 ['adFree', 'invInstance', 'mixAudio', 'audioApis'].forEach(function (k) {
   localStorage.removeItem(k);
