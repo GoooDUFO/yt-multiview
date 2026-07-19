@@ -100,15 +100,21 @@
        force the browser to re-render its neighbours */
     contain: layout paint style;
   }
-  /* 2×2 (default): tiles 5-6 hidden. 2×3: three columns in landscape,
-     three rows in portrait. */
+  /* Layouts: 2×2 (default, 4 tiles), 2×3 (6), 2×4 (8). The extra columns
+     go side-by-side in landscape and stack as extra rows in portrait. */
   .tile:nth-child(n+5) { display: none; }
-  body.grid6 #grid { grid-template-columns: 1fr 1fr 1fr; }
-  body.grid6 .tile:nth-child(n+5) { display: flex; }
+  body.grid3 #grid { grid-template-columns: repeat(3, 1fr); }
+  body.grid3 .tile:nth-child(-n+6) { display: flex; }
+  body.grid4 #grid { grid-template-columns: repeat(4, 1fr); }
+  body.grid4 .tile { display: flex; }
   @media (orientation: portrait) {
-    body.grid6 #grid {
+    body.grid3 #grid {
       grid-template-columns: 1fr 1fr;
-      grid-template-rows: 1fr 1fr 1fr;
+      grid-template-rows: repeat(3, 1fr);
+    }
+    body.grid4 #grid {
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: repeat(4, 1fr);
     }
   }
 
@@ -367,9 +373,9 @@
 <script>
 "use strict";
 
-var N_TILES = 6; // grid shows 4 (2×2) or all 6 (2×3)
-var players = [null, null, null, null, null, null];   // YT.Player instances
-var loaded  = [false, false, false, false, false, false]; // player exists & video cued
+var N_TILES = 8; // grid shows 4 (2×2), 6 (2×3), or all 8 (2×4)
+var players = [null, null, null, null, null, null, null, null];   // YT.Player instances
+var loaded  = [false, false, false, false, false, false, false, false]; // player exists & video cued
 var ytReady = false;
 var pendingLoads = []; // videos chosen before the YT API finished loading
 
@@ -609,24 +615,28 @@ $('#btn-restart-all').addEventListener('click', function () {
   else toast('Load a video in a tile first');
 });
 
-/* ---------- 2×2 / 2×3 layout ---------- */
-function grid6On() { return localStorage.getItem('grid6') === '1'; }
+/* ---------- 2×2 / 2×3 / 2×4 layout ---------- */
+function gridCols() {
+  var c = parseInt(localStorage.getItem('gridCols'), 10);
+  return (c === 3 || c === 4) ? c : 2;
+}
 function applyGridMode() {
-  document.body.classList.toggle('grid6', grid6On());
-  $('#btn-grid').textContent = grid6On() ? '⊞ 2×3' : '⊞ 2×2';
+  var c = gridCols();
+  document.body.classList.toggle('grid3', c === 3);
+  document.body.classList.toggle('grid4', c === 4);
+  $('#btn-grid').textContent = '⊞ 2×' + c;
 }
 $('#btn-grid').addEventListener('click', function () {
-  var to6 = !grid6On();
-  if (!to6) {
-    // going back to 2×2: close tiles 5-6 so hidden videos don't keep
-    // playing audio and burning decoder/network resources
-    var closed = 0;
-    for (var i = 4; i < N_TILES; i++) {
-      if (loaded[i] || tileEl(i).classList.contains('playing')) { closeVideo(i); closed++; }
-    }
-    if (closed) toast('Closed ' + closed + ' hidden tile' + (closed > 1 ? 's' : ''));
+  var next = gridCols() + 1;
+  if (next > 4) next = 2;
+  localStorage.setItem('gridCols', String(next));
+  // close tiles the new layout hides, so unseen videos don't keep playing
+  // audio and burning decoder/network resources
+  var closed = 0;
+  for (var i = next * 2; i < N_TILES; i++) {
+    if (loaded[i] || tileEl(i).classList.contains('playing')) { closeVideo(i); closed++; }
   }
-  localStorage.setItem('grid6', to6 ? '1' : '0');
+  if (closed) toast('Closed ' + closed + ' hidden tile' + (closed > 1 ? 's' : ''));
   applyGridMode();
 });
 
@@ -663,6 +673,11 @@ $('#settings-overlay').addEventListener('click', function (e) {
 
 /* ---------- misc ---------- */
 if (IS_IOS) document.body.classList.add('ios');
+// migrate the old boolean layout setting to the column count
+if (localStorage.getItem('grid6') === '1' && !localStorage.getItem('gridCols')) {
+  localStorage.setItem('gridCols', '3');
+}
+localStorage.removeItem('grid6');
 applyGridMode();
 // Settings from retired player modes (Invidious ad-free, mixed audio)
 ['adFree', 'invInstance', 'mixAudio', 'audioApis'].forEach(function (k) {
