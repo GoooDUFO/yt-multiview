@@ -7,7 +7,7 @@ Watch four YouTube videos at once in a 2×2 grid, with synced playback.
 ## Features
 
 - 2×2 grid of independent YouTube players, landscape-first layout
-- **⊞ layout toggle** – switch between 2×2 (4 tiles) and 2×3 (6 tiles; three columns in landscape, three rows in portrait). Switching back to 2×2 closes the two extra tiles to free decoding/network resources
+- **⊞ layout toggle** – cycle between 2×2 (4 tiles), 2×3 (6), and 2×4 (8). Extra columns sit side-by-side in landscape and stack as rows in portrait. Shrinking the grid closes the hidden tiles to free decoding/network resources
 - Search YouTube in each tile (needs a free YouTube Data API v3 key — add it in ⚙ Settings; stored only in your browser)
 - Or paste a YouTube link / video ID into any tile (no key needed)
 - **▶ All** – play every loaded video together
