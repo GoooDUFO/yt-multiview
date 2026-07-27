@@ -281,6 +281,28 @@
   /* iOS only plays one audible video at a time, so tiles get a speaker
      toggle there to pick which one carries the sound */
   body.ios .tile.playing .sound-btn { display: flex; }
+  .tile .skip-btn {
+    position: absolute;
+    top: 4px;
+    z-index: 5;
+    height: 26px;
+    min-width: 26px;
+    padding: 0 6px;
+    border: none;
+    border-radius: 13px;
+    background: rgba(0,0,0,.65);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+  }
+  .tile .skip-btn.back { left: 4px; }
+  .tile .skip-btn.fwd { left: 34px; }
+  .tile.playing .skip-btn { display: flex; }
 
   /* ---- settings modal ---- */
   #settings-overlay {
@@ -368,6 +390,8 @@
       <li>Copy the key and paste it below. It's stored only on this device.</li>
     </ol>
     <input type="text" id="api-key-input" placeholder="Paste API key here" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <p><b style="color:var(--text)">Skip amount</b> — seconds jumped by the «/» buttons on each tile. Decimals allowed, e.g. <b style="color:var(--text)">6.76</b>.</p>
+    <input type="text" id="skip-input" inputmode="decimal" placeholder="10" autocomplete="off" spellcheck="false">
     <div class="row">
       <button class="bar-btn" id="btn-settings-close">Close</button>
       <button class="bar-btn primary" id="btn-settings-save">Save</button>
@@ -442,6 +466,8 @@ for (var i = 0; i < N_TILES; i++) {
       '</div>' +
     '</div>' +
     '<div class="player-view"><div class="player-slot" id="player-slot-' + i + '"></div></div>' +
+    '<button class="skip-btn back" aria-label="Skip back">«</button>' +
+    '<button class="skip-btn fwd" aria-label="Skip forward">»</button>' +
     '<button class="sound-btn" aria-label="Toggle sound">🔇</button>' +
     '<button class="close-btn" aria-label="Close video">✕</button>';
   grid.appendChild(tile);
@@ -454,6 +480,8 @@ for (var i = 0; i < N_TILES; i++) {
     input.addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(); });
     $('.close-btn', tile).addEventListener('click', function () { closeVideo(idx); });
     $('.sound-btn', tile).addEventListener('click', function () { setAudioTile(idx); });
+    $('.skip-btn.back', tile).addEventListener('click', function () { skipBy(idx, -1); });
+    $('.skip-btn.fwd', tile).addEventListener('click', function () { skipBy(idx, 1); });
   })(tile, i);
 }
 function tileEl(idx) { return grid.children[idx]; }
@@ -600,6 +628,31 @@ function closeVideo(idx) {
   if (idx === audioTile) { audioTile = -1; updateSoundButtons(); }
 }
 
+/* ---------- custom skip ---------- */
+// Seconds jumped by each tile's «/» buttons; any positive number,
+// decimals included (e.g. 6.76). seekTo() takes fractional seconds.
+function skipSecs() {
+  var v = parseFloat(localStorage.getItem('skipSecs'));
+  return (v > 0 && v <= 3600) ? v : 10;
+}
+function skipBy(idx, dir) {
+  var p = players[idx];
+  if (!p || !loaded[idx]) return;
+  try {
+    var t = (p.getCurrentTime() || 0) + dir * skipSecs();
+    p.seekTo(t < 0 ? 0 : t, true);
+  } catch (e) {}
+}
+// Show the configured amount on the buttons so a custom value is visible
+function updateSkipButtons() {
+  var s = skipSecs();
+  var label = (s % 1 ? s.toFixed(2).replace(/0$/, '') : s) + 's';
+  for (var i = 0; i < N_TILES; i++) {
+    $('.skip-btn.back', tileEl(i)).textContent = '« ' + label;
+    $('.skip-btn.fwd', tileEl(i)).textContent = label + ' »';
+  }
+}
+
 function eachPlayer(fn) {
   var n = 0;
   for (var i = 0; i < N_TILES; i++) {
@@ -664,6 +717,7 @@ window.onYouTubeIframeAPIReady = function () {
 /* ---------- settings ---------- */
 function openSettings() {
   $('#api-key-input').value = getApiKey();
+  $('#skip-input').value = localStorage.getItem('skipSecs') || '';
   $('#settings-overlay').classList.add('open');
 }
 $('#btn-settings').addEventListener('click', openSettings);
@@ -672,8 +726,21 @@ $('#btn-settings-close').addEventListener('click', function () {
 });
 $('#btn-settings-save').addEventListener('click', function () {
   var v = $('#api-key-input').value.trim();
-  if (v) { localStorage.setItem('ytApiKey', v); toast('API key saved ✓'); }
-  else { localStorage.removeItem('ytApiKey'); toast('API key removed'); }
+  if (v) localStorage.setItem('ytApiKey', v);
+  else localStorage.removeItem('ytApiKey');
+
+  var s = $('#skip-input').value.trim().replace(',', '.');
+  var n = parseFloat(s);
+  if (!s) {
+    localStorage.removeItem('skipSecs'); // back to the 10s default
+  } else if (n > 0 && n <= 3600) {
+    localStorage.setItem('skipSecs', String(n));
+  } else {
+    toast('Skip amount must be a number of seconds (0–3600)');
+    return; // keep the modal open so the value can be fixed
+  }
+  updateSkipButtons();
+  toast('Settings saved ✓');
   $('#settings-overlay').classList.remove('open');
 });
 $('#settings-overlay').addEventListener('click', function (e) {
@@ -688,6 +755,7 @@ if (localStorage.getItem('grid6') === '1' && !localStorage.getItem('gridCols')) 
 }
 localStorage.removeItem('grid6');
 applyGridMode();
+updateSkipButtons();
 // Settings from retired player modes (Invidious ad-free, mixed audio)
 ['adFree', 'invInstance', 'mixAudio', 'audioApis'].forEach(function (k) {
   localStorage.removeItem(k);
