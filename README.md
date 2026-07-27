@@ -10,6 +10,7 @@ Watch four YouTube videos at once in a 2×2 grid, with synced playback.
 - **⊞ layout toggle** – cycle between 2×2 (4 tiles), 2×3 (6), 2×4 (8), and 2×5 (10). Extra columns sit side-by-side in landscape and stack as rows in portrait. Shrinking the grid closes the hidden tiles to free decoding/network resources
 - Search YouTube in each tile (needs a free YouTube Data API v3 key — add it in ⚙ Settings; stored only in your browser)
 - Or paste a YouTube link / video ID into any tile (no key needed)
+- **Custom skip** – every playing tile has «/» buttons that jump back/forward by an adjustable amount; set any number of seconds in ⚙ Settings, decimals included (e.g. 6.76)
 - **▶ All** – play every loaded video together
 - **⏸ All** – pause everything
 - **↻ Sync** – restart all videos from 0:00 at the same moment
