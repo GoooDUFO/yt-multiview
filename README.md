@@ -11,6 +11,7 @@ Watch four YouTube videos at once in a 2×2 grid, with synced playback.
 - Search YouTube in each tile (needs a free YouTube Data API v3 key — add it in ⚙ Settings; stored only in your browser)
 - Or paste a YouTube link / video ID into any tile (no key needed)
 - **Custom skip** – every playing tile has «/» buttons that jump back/forward by an adjustable amount; set any number of seconds in ⚙ Settings, decimals included (e.g. 6.76)
+- **Colourblindness filters** – each tile's 🎨 button cycles through four effects applied to that video: protanopia, deuteranopia, tritanopia, and achromatopsia (grayscale), then back to off
 - **▶ All** – play every loaded video together
 - **⏸ All** – pause everything
 - **↻ Sync** – restart all videos from 0:00 at the same moment

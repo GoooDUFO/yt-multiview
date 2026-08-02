@@ -303,6 +303,33 @@
   .tile .skip-btn.back { left: 4px; }
   .tile .skip-btn.fwd { left: 34px; }
   .tile.playing .skip-btn { display: flex; }
+  .tile .filter-btn {
+    position: absolute;
+    top: 4px;
+    right: 34px;
+    z-index: 5;
+    width: 26px;
+    height: 26px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(0,0,0,.65);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+  }
+  .tile.playing .filter-btn { display: flex; }
+  body.ios .tile .filter-btn { right: 64px; } /* speaker button sits at 34px on iOS */
+  /* colourblindness effects: SVG matrices (defs at end of body) composited
+     onto the whole player iframe */
+  .tile.cb-protan .player-view { filter: url(#cb-protan); }
+  .tile.cb-deutan .player-view { filter: url(#cb-deutan); }
+  .tile.cb-tritan .player-view { filter: url(#cb-tritan); }
+  .tile.cb-gray .player-view { filter: grayscale(1); }
 
   /* ---- settings modal ---- */
   #settings-overlay {
@@ -401,6 +428,22 @@
 
 <div id="toast"></div>
 
+<!-- colourblindness simulation matrices; sRGB interpolation keeps overall
+     brightness true to the source -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <filter id="cb-protan" color-interpolation-filters="sRGB">
+      <feColorMatrix type="matrix" values="0.567 0.433 0 0 0  0.558 0.442 0 0 0  0 0.242 0.758 0 0  0 0 0 1 0"/>
+    </filter>
+    <filter id="cb-deutan" color-interpolation-filters="sRGB">
+      <feColorMatrix type="matrix" values="0.625 0.375 0 0 0  0.7 0.3 0 0 0  0 0.3 0.7 0 0  0 0 0 1 0"/>
+    </filter>
+    <filter id="cb-tritan" color-interpolation-filters="sRGB">
+      <feColorMatrix type="matrix" values="0.95 0.05 0 0 0  0 0.433 0.567 0 0  0 0.475 0.525 0 0  0 0 0 1 0"/>
+    </filter>
+  </defs>
+</svg>
+
 <script>
 "use strict";
 
@@ -468,6 +511,7 @@ for (var i = 0; i < N_TILES; i++) {
     '<div class="player-view"><div class="player-slot" id="player-slot-' + i + '"></div></div>' +
     '<button class="skip-btn back" aria-label="Skip back">«</button>' +
     '<button class="skip-btn fwd" aria-label="Skip forward">»</button>' +
+    '<button class="filter-btn" aria-label="Colour filter" title="Colourblindness filter">🎨</button>' +
     '<button class="sound-btn" aria-label="Toggle sound">🔇</button>' +
     '<button class="close-btn" aria-label="Close video">✕</button>';
   grid.appendChild(tile);
@@ -482,6 +526,7 @@ for (var i = 0; i < N_TILES; i++) {
     $('.sound-btn', tile).addEventListener('click', function () { setAudioTile(idx); });
     $('.skip-btn.back', tile).addEventListener('click', function () { skipBy(idx, -1); });
     $('.skip-btn.fwd', tile).addEventListener('click', function () { skipBy(idx, 1); });
+    $('.filter-btn', tile).addEventListener('click', function () { cycleFilter(idx); });
   })(tile, i);
 }
 function tileEl(idx) { return grid.children[idx]; }
@@ -625,7 +670,32 @@ function closeVideo(idx) {
   }
   loaded[idx] = false;
   tileEl(idx).classList.remove('playing');
+  setFilter(idx, 0);
   if (idx === audioTile) { audioTile = -1; updateSoundButtons(); }
+}
+
+/* ---------- colourblindness filters ---------- */
+var CB_MODES = [
+  { cls: '',          name: 'Filter off',                 label: '🎨' },
+  { cls: 'cb-protan', name: 'Protanopia (red-blind)',     label: 'P' },
+  { cls: 'cb-deutan', name: 'Deuteranopia (green-blind)', label: 'D' },
+  { cls: 'cb-tritan', name: 'Tritanopia (blue-blind)',    label: 'T' },
+  { cls: 'cb-gray',   name: 'Achromatopsia (grayscale)',  label: 'G' }
+];
+var cbMode = [];
+for (var c = 0; c < N_TILES; c++) cbMode.push(0);
+
+function setFilter(idx, mode) {
+  var tile = tileEl(idx);
+  var prev = CB_MODES[cbMode[idx]].cls;
+  if (prev) tile.classList.remove(prev);
+  cbMode[idx] = mode;
+  if (CB_MODES[mode].cls) tile.classList.add(CB_MODES[mode].cls);
+  $('.filter-btn', tile).textContent = CB_MODES[mode].label;
+}
+function cycleFilter(idx) {
+  setFilter(idx, (cbMode[idx] + 1) % CB_MODES.length);
+  toast(CB_MODES[cbMode[idx]].name);
 }
 
 /* ---------- custom skip ---------- */
