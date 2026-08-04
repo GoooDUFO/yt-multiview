@@ -330,6 +330,17 @@
   .tile.cb-deutan .player-view { filter: url(#cb-deutan); }
   .tile.cb-tritan .player-view { filter: url(#cb-tritan); }
   .tile.cb-gray .player-view { filter: grayscale(1); }
+  /* Chrome on Android hands playing video to a hardware overlay plane that
+     is drawn past the compositor, so a filter on the page leaves the
+     picture untouched. Sub-unit opacity and an explicit GPU layer force the
+     video back through normal compositing, where the filter applies. Only
+     while a filter is active — these cost memory. */
+  .tile.cb-on .player-view {
+    opacity: .999;
+    transform: translateZ(0);
+    will-change: filter, transform;
+  }
+  .tile.cb-on .player-view iframe { transform: translateZ(0); }
 
   /* ---- settings modal ---- */
   #settings-overlay {
@@ -691,6 +702,7 @@ function setFilter(idx, mode) {
   if (prev) tile.classList.remove(prev);
   cbMode[idx] = mode;
   if (CB_MODES[mode].cls) tile.classList.add(CB_MODES[mode].cls);
+  tile.classList.toggle('cb-on', !!CB_MODES[mode].cls);
   $('.filter-btn', tile).textContent = CB_MODES[mode].label;
 }
 function cycleFilter(idx) {
