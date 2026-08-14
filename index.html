@@ -276,10 +276,10 @@
     -webkit-user-select: none;
     -webkit-touch-callout: none;
   }
+  /* the loop button stays a pill — it carries that tile's own length */
   .tile .ctrl-row .close-btn,
   .tile .ctrl-row .sound-btn,
-  .tile .ctrl-row .filter-btn,
-  .tile .ctrl-row .loop-btn {
+  .tile .ctrl-row .filter-btn {
     width: 26px;
     padding: 0;
     border-radius: 50%;
@@ -310,8 +310,7 @@
     }
     .tile .ctrl-row .close-btn,
     .tile .ctrl-row .sound-btn,
-    .tile .ctrl-row .filter-btn,
-    .tile .ctrl-row .loop-btn { width: 22px; }
+    .tile .ctrl-row .filter-btn { width: 22px; }
   }
   /* colourblindness effects: SVG matrices (defs at end of body) composited
      onto the whole player iframe */
@@ -419,7 +418,7 @@
     <input type="text" id="api-key-input" placeholder="Paste API key here" autocomplete="off" autocapitalize="off" spellcheck="false">
     <p><b style="color:var(--text)">Skip amount</b> — seconds jumped by the «/» buttons on each tile. Decimals allowed, e.g. <b style="color:var(--text)">6.76</b>.</p>
     <input type="text" id="skip-input" inputmode="decimal" placeholder="10" autocomplete="off" spellcheck="false">
-    <p><b style="color:var(--text)">Loop length</b> — how long a looping tile plays before jumping back to where you started it. Tap a tile's ⟳ to loop from that moment; long-press ⟳ to give that tile its own length.</p>
+    <p><b style="color:var(--text)">Default loop length</b> — every tile carries its own loop length, shown on its ⟳ button; <b style="color:var(--text)">long-press a tile's ⟳ to change just that tile</b>. This value is what tiles start from. Tapping ⟳ loops the tile from that moment for its own length.</p>
     <input type="text" id="loop-input" inputmode="decimal" placeholder="10" autocomplete="off" spellcheck="false">
     <div class="row">
       <button class="bar-btn" id="btn-settings-close">Close</button>
@@ -516,7 +515,7 @@ for (var i = 0; i < N_TILES; i++) {
     '<div class="ctrl-row left">' +
       '<button class="skip-btn back" aria-label="Skip back">«<span class="lbl"></span></button>' +
       '<button class="skip-btn fwd" aria-label="Skip forward"><span class="lbl"></span>»</button>' +
-      '<button class="loop-btn" aria-label="Loop" title="Loop">⟳</button>' +
+      '<button class="loop-btn" aria-label="Loop">⟳<span class="lbl"></span></button>' +
     '</div>' +
     '<div class="ctrl-row right">' +
       '<button class="filter-btn" aria-label="Colour filter" title="Colourblindness filter">🎨</button>' +
@@ -698,8 +697,7 @@ function closeVideo(idx) {
   loaded[idx] = false;
   tileEl(idx).classList.remove('playing');
   setFilter(idx, 0);
-  setLoop(idx, false);
-  loopLen[idx] = null;
+  setLoop(idx, false); // the tile keeps its own loop length for the next video
   if (idx === audioTile) { audioTile = -1; updateSoundButtons(); }
 }
 
@@ -769,24 +767,46 @@ var loopOn = [], loopStart = [], loopLen = [];
 for (var lp = 0; lp < N_TILES; lp++) { loopOn.push(false); loopStart.push(0); loopLen.push(null); }
 var loopTimer = null;
 
+// Each tile keeps its own length across reloads; the Settings value is only
+// the starting point for tiles that have never been given one.
+function saveLoopLens() { localStorage.setItem('loopLens', JSON.stringify(loopLen)); }
+function restoreLoopLens() {
+  var a;
+  try { a = JSON.parse(localStorage.getItem('loopLens') || '[]'); } catch (e) { return; }
+  if (!a || !a.length) return;
+  for (var i = 0; i < N_TILES && i < a.length; i++) {
+    var v = parseFloat(a[i]);
+    loopLen[i] = (v > 0 && v <= 3600) ? v : null;
+  }
+}
+
 function defaultLoopSecs() {
   var v = parseFloat(localStorage.getItem('loopSecs'));
   return (v > 0 && v <= 3600) ? v : 10;
 }
-// per-tile override, else the value from Settings
+// this tile's own length, else the default from Settings
 function loopLenOf(idx) { return loopLen[idx] != null ? loopLen[idx] : defaultLoopSecs(); }
 
 function setLoop(idx, on, start) {
   loopOn[idx] = on;
   if (on) loopStart[idx] = start;
-  var b = $('.loop-btn', tileEl(idx));
-  if (b) {
-    b.classList.toggle('on', on);
-    b.title = on
-      ? 'Looping ' + fmtSecs(loopLenOf(idx)) + 's from ' + fmtClock(loopStart[idx])
-      : 'Loop (long-press to set length)';
-  }
+  updateLoopButton(idx);
   syncLoopTimer();
+}
+
+// The tile's length rides on its own button, so every tile shows what it
+// will do without opening anything.
+function updateLoopButton(idx) {
+  var b = $('.loop-btn', tileEl(idx));
+  if (!b) return;
+  var len = fmtSecs(loopLenOf(idx));
+  b.classList.toggle('on', loopOn[idx]);
+  $('.lbl', b).textContent = ' ' + len + 's';
+  b.title = (loopOn[idx] ? 'Looping ' + len + 's from ' + fmtClock(loopStart[idx]) : 'Loop ' + len + 's') +
+            ' — long-press to change this tile\'s length';
+}
+function updateLoopButtons() {
+  for (var i = 0; i < N_TILES; i++) updateLoopButton(i);
 }
 
 function toggleLoop(idx) {
@@ -795,20 +815,25 @@ function toggleLoop(idx) {
   var t = 0;
   try { t = players[idx].getCurrentTime() || 0; } catch (e) {}
   setLoop(idx, true, t);
-  toast('Looping ' + fmtSecs(loopLenOf(idx)) + 's from ' + fmtClock(t));
+  toast('Tile ' + (idx + 1) + ': looping ' + fmtSecs(loopLenOf(idx)) + 's from ' + fmtClock(t));
+  if (!localStorage.getItem('seenLoopHint')) {
+    localStorage.setItem('seenLoopHint', '1');
+    setTimeout(function () { toast('Long-press ⟳ to set this tile\'s own loop length', 4000); }, 2800);
+  }
 }
 
 function promptLoopLen(idx) {
   var v = window.prompt(
-    'Loop length for this tile, in seconds — blank uses the ' +
+    'Loop length for tile ' + (idx + 1) + ', in seconds — blank uses the ' +
     fmtSecs(defaultLoopSecs()) + 's default:', String(loopLenOf(idx)));
   if (v === null) return;
   v = v.trim().replace(',', '.');
   var n = parseFloat(v);
-  if (!v) { loopLen[idx] = null; toast('Tile uses the ' + fmtSecs(defaultLoopSecs()) + 's default'); }
-  else if (n > 0 && n <= 3600) { loopLen[idx] = n; toast('Loop length ' + fmtSecs(n) + 's'); }
+  if (!v) { loopLen[idx] = null; toast('Tile ' + (idx + 1) + ' uses the ' + fmtSecs(defaultLoopSecs()) + 's default'); }
+  else if (n > 0 && n <= 3600) { loopLen[idx] = n; toast('Tile ' + (idx + 1) + ' loops ' + fmtSecs(n) + 's'); }
   else { toast('Loop length must be a number of seconds (0–3600)'); return; }
-  if (loopOn[idx]) setLoop(idx, true, loopStart[idx]); // refresh the label
+  saveLoopLens();
+  updateLoopButton(idx);
 }
 
 // One shared poll, running only while something is actually looping
@@ -937,9 +962,7 @@ $('#btn-settings-save').addEventListener('click', function () {
     return;
   }
   updateSkipButtons();
-  for (var li = 0; li < N_TILES; li++) {
-    if (loopOn[li]) setLoop(li, true, loopStart[li]); // pick up a new default
-  }
+  updateLoopButtons(); // tiles without their own length follow the new default
   toast('Settings saved ✓');
   $('#settings-overlay').classList.remove('open');
 });
@@ -956,6 +979,8 @@ if (localStorage.getItem('grid6') === '1' && !localStorage.getItem('gridCols')) 
 localStorage.removeItem('grid6');
 applyGridMode();
 updateSkipButtons();
+restoreLoopLens();
+updateLoopButtons();
 // Settings from retired player modes (Invidious ad-free, mixed audio)
 ['adFree', 'invInstance', 'mixAudio', 'audioApis'].forEach(function (k) {
   localStorage.removeItem(k);
