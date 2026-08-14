@@ -12,7 +12,8 @@ Watch four YouTube videos at once in a 2×2 grid, with synced playback.
 - Or paste a YouTube link / video ID into any tile (no key needed)
 - **Custom skip** – every playing tile has «/» buttons that jump back/forward by an adjustable amount; set any number of seconds in ⚙ Settings, decimals included (e.g. 6.76)
 - **Per-tile loop** – tap a tile's ⟳ to loop it from exactly where it is: it plays for that tile's loop length, jumps back to that point, and repeats until you tap ⟳ again. Every tile has its own length, shown right on its ⟳ button — long-press ⟳ to change just that tile (decimals fine, e.g. 11.5s), and it sticks across reloads. ⚙ Settings holds the default that new tiles start from
-- **Colourblindness filters** – each tile's 🎨 button cycles through four effects applied to that video: protanopia, deuteranopia, tritanopia, and achromatopsia (grayscale), then back to off
+- **Video effects** – each tile's ✨ button cycles through Vintage, Washed out, VHS and Frosted, then back to off. These use built-in CSS filter functions, so they work on every platform
+- **Colourblindness filters** – each tile's 🎨 button cycles through four simulations applied to that video: protanopia, deuteranopia, tritanopia, and achromatopsia (grayscale), then back to off. A tile can carry one effect and one filter at once. Note: Chrome on Android doesn't apply the SVG-matrix simulations (protanopia/deuteranopia/tritanopia) over video — grayscale and all the ✨ effects work there
 - **▶ All** – play every loaded video together
 - **⏸ All** – pause everything
 - **↻ Sync** – restart all videos from 0:00 at the same moment

@@ -243,20 +243,34 @@
     height: 100%;
     border: 0;
   }
-  /* Tile controls sit in two flex rows — one per corner — so buttons lay
-     themselves out and can never overlap, however many a tile carries. */
-  .tile .ctrl-row {
+  /* One bar spanning the tile, holding a group at each end. Two separate
+     corner rows could still run into each other once a tile carried enough
+     buttons; inside a single flex line they cannot, and a squeezed group
+     wraps onto another line instead of overlapping its neighbour. The bar
+     itself ignores taps so the gap between the groups belongs to the
+     player, not to us. */
+  .tile .ctrl-bar {
     position: absolute;
     top: 4px;
+    left: 4px;
+    right: 4px;
     z-index: 5;
     display: none;
+    justify-content: space-between;
+    align-items: flex-start;
     gap: 4px;
-    align-items: center;
+    pointer-events: none;
   }
-  .tile .ctrl-row.left { left: 4px; }
-  .tile .ctrl-row.right { right: 4px; }
-  .tile.playing .ctrl-row { display: flex; }
-  .tile .ctrl-row button {
+  .tile.playing .ctrl-bar { display: flex; }
+  .tile .ctrl-grp {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    min-width: 0;
+    pointer-events: auto;
+  }
+  .tile .ctrl-grp.right { justify-content: flex-end; }
+  .tile .ctrl-bar button {
     flex: 0 0 auto;
     height: 26px;
     min-width: 26px;
@@ -277,47 +291,69 @@
     -webkit-touch-callout: none;
   }
   /* the loop button stays a pill — it carries that tile's own length */
-  .tile .ctrl-row .close-btn,
-  .tile .ctrl-row .sound-btn,
-  .tile .ctrl-row .filter-btn {
+  .tile .ctrl-bar .close-btn,
+  .tile .ctrl-bar .sound-btn,
+  .tile .ctrl-bar .filter-btn,
+  .tile .ctrl-bar .fx-btn {
     width: 26px;
     padding: 0;
     border-radius: 50%;
   }
-  .tile .ctrl-row .close-btn { font-size: 13px; }
-  .tile .ctrl-row .filter-btn { font-weight: 700; }
-  .tile .ctrl-row .skip-btn { font-size: 11px; }
-  .tile .ctrl-row .loop-btn.on { background: var(--accent); color: #06243a; }
+  .tile .ctrl-bar .close-btn { font-size: 13px; }
+  .tile .ctrl-bar .filter-btn,
+  .tile .ctrl-bar .fx-btn { font-weight: 700; }
+  .tile .ctrl-bar .skip-btn { font-size: 11px; }
+  .tile .ctrl-bar .loop-btn.on { background: var(--accent); color: #06243a; }
+  .tile .ctrl-bar .fx-btn.on,
+  .tile .ctrl-bar .filter-btn.on { background: var(--accent); color: #06243a; }
   /* iOS only plays one audible video at a time, so tiles get a speaker
      toggle there to pick which one carries the sound */
-  .tile .ctrl-row .sound-btn { display: none; }
-  body.ios .tile .ctrl-row .sound-btn { display: flex; }
-  /* Narrow tiles (2×4, 2×5, portrait) drop the skip labels, then shrink,
-     so the two rows never run into each other. */
-  /* selectors here must match the base rules' specificity — container
-     queries add none of their own, so a plainer selector would lose */
-  @container (max-width: 270px) {
-    .tile .ctrl-row .lbl { display: none; }
+  .tile .ctrl-bar .sound-btn { display: none; }
+  body.ios .tile .ctrl-bar .sound-btn { display: flex; }
+  /* Narrow tiles (2×4, 2×5, portrait) drop the skip labels, then shrink.
+     Selectors here must match the base rules' specificity — container
+     queries add none of their own, so a plainer selector would lose. */
+  @container (max-width: 320px) {
+    .tile .ctrl-bar .lbl { display: none; }
   }
-  @container (max-width: 200px) {
-    .tile .ctrl-row { gap: 3px; }
-    .tile .ctrl-row button {
+  @container (max-width: 230px) {
+    .tile .ctrl-bar, .tile .ctrl-grp { gap: 3px; }
+    .tile .ctrl-bar button {
       height: 22px;
       min-width: 22px;
       width: 22px;
       padding: 0;
       font-size: 11px;
     }
-    .tile .ctrl-row .close-btn,
-    .tile .ctrl-row .sound-btn,
-    .tile .ctrl-row .filter-btn { width: 22px; }
+    .tile .ctrl-bar .close-btn,
+    .tile .ctrl-bar .sound-btn,
+    .tile .ctrl-bar .filter-btn,
+    .tile .ctrl-bar .fx-btn { width: 22px; }
+  }
+  @container (max-width: 175px) {
+    .tile .ctrl-bar, .tile .ctrl-grp { gap: 2px; }
+    .tile .ctrl-bar button { height: 20px; min-width: 20px; width: 20px; font-size: 10px; }
+    .tile .ctrl-bar .close-btn,
+    .tile .ctrl-bar .sound-btn,
+    .tile .ctrl-bar .filter-btn,
+    .tile .ctrl-bar .fx-btn { width: 20px; }
   }
   /* colourblindness effects: SVG matrices (defs at end of body) composited
      onto the whole player iframe */
-  .tile.cb-protan .player-view { filter: url(#cb-protan); }
-  .tile.cb-deutan .player-view { filter: url(#cb-deutan); }
-  .tile.cb-tritan .player-view { filter: url(#cb-tritan); }
-  .tile.cb-gray .player-view { filter: grayscale(1); }
+  /* Colourblindness sims go on the iframe and fun effects on its container,
+     so a tile can carry one of each and they compose by nesting instead of
+     one filter property overwriting the other. */
+  .tile.cb-protan .player-view iframe { filter: url(#cb-protan); }
+  .tile.cb-deutan .player-view iframe { filter: url(#cb-deutan); }
+  .tile.cb-tritan .player-view iframe { filter: url(#cb-tritan); }
+  .tile.cb-gray .player-view iframe { filter: grayscale(1); }
+  /* Fun effects — built-in filter functions only. The compositor implements
+     these natively, so unlike the SVG matrices above they hold up on
+     Android too. */
+  .tile.fx-sepia .player-view { filter: sepia(1); }
+  .tile.fx-washed .player-view { filter: saturate(.3) contrast(.8); }
+  .tile.fx-vhs .player-view { filter: sepia(.4) saturate(1.6) contrast(.9); }
+  .tile.fx-frost .player-view { filter: blur(3px); }
   /* Chrome on Android hands playing video to a hardware overlay plane that
      is drawn past the compositor, so a filter on the page leaves the
      picture untouched. Sub-unit opacity forces the video back through
@@ -327,8 +363,8 @@
      reference filters — url(#…), i.e. the P/D/T matrices — on promoted
      layers, while built-in functions like grayscale() still work. The
      layer hint goes on the inner iframe instead. */
-  .tile.cb-on .player-view { opacity: .999; }
-  .tile.cb-on .player-view iframe { transform: translateZ(0); }
+  .tile.cb-on .player-view,
+  .tile.fx-on .player-view { opacity: .999; }
 
   /* ---- settings modal ---- */
   #settings-overlay {
@@ -512,15 +548,18 @@ for (var i = 0; i < N_TILES; i++) {
       '</div>' +
     '</div>' +
     '<div class="player-view"><div class="player-slot" id="player-slot-' + i + '"></div></div>' +
-    '<div class="ctrl-row left">' +
-      '<button class="skip-btn back" aria-label="Skip back">«<span class="lbl"></span></button>' +
-      '<button class="skip-btn fwd" aria-label="Skip forward"><span class="lbl"></span>»</button>' +
-      '<button class="loop-btn" aria-label="Loop">⟳<span class="lbl"></span></button>' +
-    '</div>' +
-    '<div class="ctrl-row right">' +
-      '<button class="filter-btn" aria-label="Colour filter" title="Colourblindness filter">🎨</button>' +
-      '<button class="sound-btn" aria-label="Toggle sound">🔇</button>' +
-      '<button class="close-btn" aria-label="Close video">✕</button>' +
+    '<div class="ctrl-bar">' +
+      '<div class="ctrl-grp left">' +
+        '<button class="skip-btn back" aria-label="Skip back">«<span class="lbl"></span></button>' +
+        '<button class="skip-btn fwd" aria-label="Skip forward"><span class="lbl"></span>»</button>' +
+        '<button class="loop-btn" aria-label="Loop">⟳<span class="lbl"></span></button>' +
+      '</div>' +
+      '<div class="ctrl-grp right">' +
+        '<button class="fx-btn" aria-label="Video effect" title="Video effect">✨</button>' +
+        '<button class="filter-btn" aria-label="Colour filter" title="Colourblindness filter">🎨</button>' +
+        '<button class="sound-btn" aria-label="Toggle sound">🔇</button>' +
+        '<button class="close-btn" aria-label="Close video">✕</button>' +
+      '</div>' +
     '</div>';
   grid.appendChild(tile);
 
@@ -535,6 +574,7 @@ for (var i = 0; i < N_TILES; i++) {
     $('.skip-btn.back', tile).addEventListener('click', function () { skipBy(idx, -1); });
     $('.skip-btn.fwd', tile).addEventListener('click', function () { skipBy(idx, 1); });
     $('.filter-btn', tile).addEventListener('click', function () { cycleFilter(idx); });
+    $('.fx-btn', tile).addEventListener('click', function () { cycleFx(idx); });
     // Loop: tap toggles, long-press sets this tile's own loop length
     (function (btn) {
       var press = null, longFired = false;
@@ -697,6 +737,7 @@ function closeVideo(idx) {
   loaded[idx] = false;
   tileEl(idx).classList.remove('playing');
   setFilter(idx, 0);
+  setFx(idx, 0);
   setLoop(idx, false); // the tile keeps its own loop length for the next video
   if (idx === audioTile) { audioTile = -1; updateSoundButtons(); }
 }
@@ -719,11 +760,43 @@ function setFilter(idx, mode) {
   cbMode[idx] = mode;
   if (CB_MODES[mode].cls) tile.classList.add(CB_MODES[mode].cls);
   tile.classList.toggle('cb-on', !!CB_MODES[mode].cls);
-  $('.filter-btn', tile).textContent = CB_MODES[mode].label;
+  var b = $('.filter-btn', tile);
+  b.textContent = CB_MODES[mode].label;
+  b.classList.toggle('on', !!CB_MODES[mode].cls);
+  b.title = CB_MODES[mode].name;
 }
 function cycleFilter(idx) {
   setFilter(idx, (cbMode[idx] + 1) % CB_MODES.length);
   toast(CB_MODES[cbMode[idx]].name);
+}
+
+/* ---------- fun video effects ---------- */
+// Built-in CSS filter functions only, so these behave the same everywhere.
+var FX_MODES = [
+  { cls: '',           name: 'Effect off',  label: '✨' },
+  { cls: 'fx-sepia',   name: 'Vintage',     label: 'S' },
+  { cls: 'fx-washed',  name: 'Washed out',  label: 'W' },
+  { cls: 'fx-vhs',     name: 'VHS',         label: 'V' },
+  { cls: 'fx-frost',   name: 'Frosted',     label: 'F' }
+];
+var fxMode = [];
+for (var fx = 0; fx < N_TILES; fx++) fxMode.push(0);
+
+function setFx(idx, mode) {
+  var tile = tileEl(idx);
+  var prev = FX_MODES[fxMode[idx]].cls;
+  if (prev) tile.classList.remove(prev);
+  fxMode[idx] = mode;
+  if (FX_MODES[mode].cls) tile.classList.add(FX_MODES[mode].cls);
+  tile.classList.toggle('fx-on', !!FX_MODES[mode].cls);
+  var b = $('.fx-btn', tile);
+  b.textContent = FX_MODES[mode].label;
+  b.classList.toggle('on', !!FX_MODES[mode].cls);
+  b.title = FX_MODES[mode].name;
+}
+function cycleFx(idx) {
+  setFx(idx, (fxMode[idx] + 1) % FX_MODES.length);
+  toast(FX_MODES[fxMode[idx]].name);
 }
 
 /* ---------- custom skip ---------- */
