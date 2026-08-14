@@ -99,6 +99,8 @@
     /* isolate each tile's layout/paint work so one busy player can't
        force the browser to re-render its neighbours */
     contain: layout paint style;
+    /* lets the control rows respond to tile width, not screen width */
+    container-type: inline-size;
   }
   /* Layouts: 2×2 (default, 4 tiles), 2×3 (6), 2×4 (8), 2×5 (10). The
      extra columns go side-by-side in landscape and stack as extra rows
@@ -241,50 +243,21 @@
     height: 100%;
     border: 0;
   }
-  .tile .close-btn {
+  /* Tile controls sit in two flex rows — one per corner — so buttons lay
+     themselves out and can never overlap, however many a tile carries. */
+  .tile .ctrl-row {
     position: absolute;
     top: 4px;
-    right: 4px;
     z-index: 5;
-    width: 26px;
-    height: 26px;
-    border: none;
-    border-radius: 50%;
-    background: rgba(0,0,0,.65);
-    color: #fff;
-    font-size: 13px;
-    line-height: 1;
-    cursor: pointer;
     display: none;
+    gap: 4px;
     align-items: center;
-    justify-content: center;
   }
-  .tile.playing .close-btn { display: flex; }
-  .tile .sound-btn {
-    position: absolute;
-    top: 4px;
-    right: 34px;
-    z-index: 5;
-    width: 26px;
-    height: 26px;
-    border: none;
-    border-radius: 50%;
-    background: rgba(0,0,0,.65);
-    color: #fff;
-    font-size: 13px;
-    line-height: 1;
-    cursor: pointer;
-    display: none;
-    align-items: center;
-    justify-content: center;
-  }
-  /* iOS only plays one audible video at a time, so tiles get a speaker
-     toggle there to pick which one carries the sound */
-  body.ios .tile.playing .sound-btn { display: flex; }
-  .tile .skip-btn {
-    position: absolute;
-    top: 4px;
-    z-index: 5;
+  .tile .ctrl-row.left { left: 4px; }
+  .tile .ctrl-row.right { right: 4px; }
+  .tile.playing .ctrl-row { display: flex; }
+  .tile .ctrl-row button {
+    flex: 0 0 auto;
     height: 26px;
     min-width: 26px;
     padding: 0 6px;
@@ -292,38 +265,54 @@
     border-radius: 13px;
     background: rgba(0,0,0,.65);
     color: #fff;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     line-height: 1;
     cursor: pointer;
-    display: none;
+    display: flex;
     align-items: center;
     justify-content: center;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
   }
-  .tile .skip-btn.back { left: 4px; }
-  .tile .skip-btn.fwd { left: 34px; }
-  .tile.playing .skip-btn { display: flex; }
-  .tile .filter-btn {
-    position: absolute;
-    top: 4px;
-    right: 34px;
-    z-index: 5;
+  .tile .ctrl-row .close-btn,
+  .tile .ctrl-row .sound-btn,
+  .tile .ctrl-row .filter-btn,
+  .tile .ctrl-row .loop-btn {
     width: 26px;
-    height: 26px;
-    border: none;
+    padding: 0;
     border-radius: 50%;
-    background: rgba(0,0,0,.65);
-    color: #fff;
-    font-size: 12px;
-    font-weight: 700;
-    line-height: 1;
-    cursor: pointer;
-    display: none;
-    align-items: center;
-    justify-content: center;
   }
-  .tile.playing .filter-btn { display: flex; }
-  body.ios .tile .filter-btn { right: 64px; } /* speaker button sits at 34px on iOS */
+  .tile .ctrl-row .close-btn { font-size: 13px; }
+  .tile .ctrl-row .filter-btn { font-weight: 700; }
+  .tile .ctrl-row .skip-btn { font-size: 11px; }
+  .tile .ctrl-row .loop-btn.on { background: var(--accent); color: #06243a; }
+  /* iOS only plays one audible video at a time, so tiles get a speaker
+     toggle there to pick which one carries the sound */
+  .tile .ctrl-row .sound-btn { display: none; }
+  body.ios .tile .ctrl-row .sound-btn { display: flex; }
+  /* Narrow tiles (2×4, 2×5, portrait) drop the skip labels, then shrink,
+     so the two rows never run into each other. */
+  /* selectors here must match the base rules' specificity — container
+     queries add none of their own, so a plainer selector would lose */
+  @container (max-width: 270px) {
+    .tile .ctrl-row .lbl { display: none; }
+  }
+  @container (max-width: 200px) {
+    .tile .ctrl-row { gap: 3px; }
+    .tile .ctrl-row button {
+      height: 22px;
+      min-width: 22px;
+      width: 22px;
+      padding: 0;
+      font-size: 11px;
+    }
+    .tile .ctrl-row .close-btn,
+    .tile .ctrl-row .sound-btn,
+    .tile .ctrl-row .filter-btn,
+    .tile .ctrl-row .loop-btn { width: 22px; }
+  }
   /* colourblindness effects: SVG matrices (defs at end of body) composited
      onto the whole player iframe */
   .tile.cb-protan .player-view { filter: url(#cb-protan); }
@@ -430,6 +419,8 @@
     <input type="text" id="api-key-input" placeholder="Paste API key here" autocomplete="off" autocapitalize="off" spellcheck="false">
     <p><b style="color:var(--text)">Skip amount</b> — seconds jumped by the «/» buttons on each tile. Decimals allowed, e.g. <b style="color:var(--text)">6.76</b>.</p>
     <input type="text" id="skip-input" inputmode="decimal" placeholder="10" autocomplete="off" spellcheck="false">
+    <p><b style="color:var(--text)">Loop length</b> — how long a looping tile plays before jumping back to where you started it. Tap a tile's ⟳ to loop from that moment; long-press ⟳ to give that tile its own length.</p>
+    <input type="text" id="loop-input" inputmode="decimal" placeholder="10" autocomplete="off" spellcheck="false">
     <div class="row">
       <button class="bar-btn" id="btn-settings-close">Close</button>
       <button class="bar-btn primary" id="btn-settings-save">Save</button>
@@ -522,11 +513,16 @@ for (var i = 0; i < N_TILES; i++) {
       '</div>' +
     '</div>' +
     '<div class="player-view"><div class="player-slot" id="player-slot-' + i + '"></div></div>' +
-    '<button class="skip-btn back" aria-label="Skip back">«</button>' +
-    '<button class="skip-btn fwd" aria-label="Skip forward">»</button>' +
-    '<button class="filter-btn" aria-label="Colour filter" title="Colourblindness filter">🎨</button>' +
-    '<button class="sound-btn" aria-label="Toggle sound">🔇</button>' +
-    '<button class="close-btn" aria-label="Close video">✕</button>';
+    '<div class="ctrl-row left">' +
+      '<button class="skip-btn back" aria-label="Skip back">«<span class="lbl"></span></button>' +
+      '<button class="skip-btn fwd" aria-label="Skip forward"><span class="lbl"></span>»</button>' +
+      '<button class="loop-btn" aria-label="Loop" title="Loop">⟳</button>' +
+    '</div>' +
+    '<div class="ctrl-row right">' +
+      '<button class="filter-btn" aria-label="Colour filter" title="Colourblindness filter">🎨</button>' +
+      '<button class="sound-btn" aria-label="Toggle sound">🔇</button>' +
+      '<button class="close-btn" aria-label="Close video">✕</button>' +
+    '</div>';
   grid.appendChild(tile);
 
   (function (tile, idx) {
@@ -540,6 +536,23 @@ for (var i = 0; i < N_TILES; i++) {
     $('.skip-btn.back', tile).addEventListener('click', function () { skipBy(idx, -1); });
     $('.skip-btn.fwd', tile).addEventListener('click', function () { skipBy(idx, 1); });
     $('.filter-btn', tile).addEventListener('click', function () { cycleFilter(idx); });
+    // Loop: tap toggles, long-press sets this tile's own loop length
+    (function (btn) {
+      var press = null, longFired = false;
+      btn.addEventListener('pointerdown', function () {
+        longFired = false;
+        clearTimeout(press);
+        press = setTimeout(function () { longFired = true; promptLoopLen(idx); }, 550);
+      });
+      ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (ev) {
+        btn.addEventListener(ev, function () { clearTimeout(press); });
+      });
+      btn.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+      btn.addEventListener('click', function () {
+        if (longFired) { longFired = false; return; }
+        toggleLoop(idx);
+      });
+    })($('.loop-btn', tile));
   })(tile, i);
 }
 function tileEl(idx) { return grid.children[idx]; }
@@ -610,6 +623,7 @@ function renderResults(idx, items) {
 /* ---------- players ---------- */
 function loadVideo(idx, videoId) {
   tileEl(idx).classList.add('playing');
+  setLoop(idx, false); // a loop point from the previous video means nothing here
   // iOS: the first tile to load a video gets the sound; later tiles start
   // muted so starting them doesn't pause the ones already playing.
   if (IS_IOS && audioTile === -1) audioTile = idx;
@@ -684,6 +698,8 @@ function closeVideo(idx) {
   loaded[idx] = false;
   tileEl(idx).classList.remove('playing');
   setFilter(idx, 0);
+  setLoop(idx, false);
+  loopLen[idx] = null;
   if (idx === audioTile) { audioTile = -1; updateSoundButtons(); }
 }
 
@@ -729,11 +745,96 @@ function skipBy(idx, dir) {
 }
 // Show the configured amount on the buttons so a custom value is visible
 function updateSkipButtons() {
-  var s = skipSecs();
-  var label = (s % 1 ? s.toFixed(2).replace(/0$/, '') : s) + 's';
+  var label = fmtSecs(skipSecs()) + 's';
   for (var i = 0; i < N_TILES; i++) {
-    $('.skip-btn.back', tileEl(i)).textContent = '« ' + label;
-    $('.skip-btn.fwd', tileEl(i)).textContent = label + ' »';
+    $('.skip-btn.back .lbl', tileEl(i)).textContent = ' ' + label;
+    $('.skip-btn.fwd .lbl', tileEl(i)).textContent = label + ' ';
+  }
+}
+
+// 11.5 -> "11.5", 6.76 -> "6.76", 10 -> "10"
+function fmtSecs(s) { return String(Math.round(s * 100) / 100); }
+// 71.5 -> "1:11.5"
+function fmtClock(t) {
+  var r = Math.round(t * 10) / 10;
+  var m = Math.floor(r / 60), s = r - m * 60;
+  return m + ':' + (s < 9.95 ? '0' : '') + s.toFixed(1);
+}
+
+/* ---------- per-tile loop ---------- */
+// Tap ⟳ and the tile loops from wherever it is right now: it plays for the
+// loop length, jumps back to that exact point, and repeats until tapped
+// again. Long-press the button to give one tile its own length.
+var loopOn = [], loopStart = [], loopLen = [];
+for (var lp = 0; lp < N_TILES; lp++) { loopOn.push(false); loopStart.push(0); loopLen.push(null); }
+var loopTimer = null;
+
+function defaultLoopSecs() {
+  var v = parseFloat(localStorage.getItem('loopSecs'));
+  return (v > 0 && v <= 3600) ? v : 10;
+}
+// per-tile override, else the value from Settings
+function loopLenOf(idx) { return loopLen[idx] != null ? loopLen[idx] : defaultLoopSecs(); }
+
+function setLoop(idx, on, start) {
+  loopOn[idx] = on;
+  if (on) loopStart[idx] = start;
+  var b = $('.loop-btn', tileEl(idx));
+  if (b) {
+    b.classList.toggle('on', on);
+    b.title = on
+      ? 'Looping ' + fmtSecs(loopLenOf(idx)) + 's from ' + fmtClock(loopStart[idx])
+      : 'Loop (long-press to set length)';
+  }
+  syncLoopTimer();
+}
+
+function toggleLoop(idx) {
+  if (!players[idx] || !loaded[idx]) return;
+  if (loopOn[idx]) { setLoop(idx, false); toast('Loop off'); return; }
+  var t = 0;
+  try { t = players[idx].getCurrentTime() || 0; } catch (e) {}
+  setLoop(idx, true, t);
+  toast('Looping ' + fmtSecs(loopLenOf(idx)) + 's from ' + fmtClock(t));
+}
+
+function promptLoopLen(idx) {
+  var v = window.prompt(
+    'Loop length for this tile, in seconds — blank uses the ' +
+    fmtSecs(defaultLoopSecs()) + 's default:', String(loopLenOf(idx)));
+  if (v === null) return;
+  v = v.trim().replace(',', '.');
+  var n = parseFloat(v);
+  if (!v) { loopLen[idx] = null; toast('Tile uses the ' + fmtSecs(defaultLoopSecs()) + 's default'); }
+  else if (n > 0 && n <= 3600) { loopLen[idx] = n; toast('Loop length ' + fmtSecs(n) + 's'); }
+  else { toast('Loop length must be a number of seconds (0–3600)'); return; }
+  if (loopOn[idx]) setLoop(idx, true, loopStart[idx]); // refresh the label
+}
+
+// One shared poll, running only while something is actually looping
+function syncLoopTimer() {
+  var any = false;
+  for (var i = 0; i < N_TILES; i++) { if (loopOn[i]) any = true; }
+  if (any && !loopTimer) loopTimer = setInterval(loopTick, 100);
+  else if (!any && loopTimer) { clearInterval(loopTimer); loopTimer = null; }
+}
+
+function loopTick() {
+  for (var i = 0; i < N_TILES; i++) {
+    if (!loopOn[i] || !players[i] || !loaded[i]) continue;
+    try {
+      var start = loopStart[i];
+      var end = start + loopLenOf(i);
+      // state 0 = ENDED: the loop window ran past the end of the video
+      if (players[i].getPlayerState() === 0) {
+        players[i].seekTo(start, true);
+        players[i].playVideo();
+        continue;
+      }
+      var t = players[i].getCurrentTime() || 0;
+      // the lower bound has slack so a manual nudge inside the loop sticks
+      if (t >= end || t < start - 0.75) players[i].seekTo(start, true);
+    } catch (e) {}
   }
 }
 
@@ -802,6 +903,7 @@ window.onYouTubeIframeAPIReady = function () {
 function openSettings() {
   $('#api-key-input').value = getApiKey();
   $('#skip-input').value = localStorage.getItem('skipSecs') || '';
+  $('#loop-input').value = localStorage.getItem('loopSecs') || '';
   $('#settings-overlay').classList.add('open');
 }
 $('#btn-settings').addEventListener('click', openSettings);
@@ -823,7 +925,21 @@ $('#btn-settings-save').addEventListener('click', function () {
     toast('Skip amount must be a number of seconds (0–3600)');
     return; // keep the modal open so the value can be fixed
   }
+
+  var ls = $('#loop-input').value.trim().replace(',', '.');
+  var ln = parseFloat(ls);
+  if (!ls) {
+    localStorage.removeItem('loopSecs');
+  } else if (ln > 0 && ln <= 3600) {
+    localStorage.setItem('loopSecs', String(ln));
+  } else {
+    toast('Loop length must be a number of seconds (0–3600)');
+    return;
+  }
   updateSkipButtons();
+  for (var li = 0; li < N_TILES; li++) {
+    if (loopOn[li]) setLoop(li, true, loopStart[li]); // pick up a new default
+  }
   toast('Settings saved ✓');
   $('#settings-overlay').classList.remove('open');
 });
