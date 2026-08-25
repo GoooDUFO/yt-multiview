@@ -354,6 +354,15 @@
   .tile.fx-washed .player-view { filter: saturate(.3) contrast(.8); }
   .tile.fx-vhs .player-view { filter: sepia(.4) saturate(1.6) contrast(.9); }
   .tile.fx-frost .player-view { filter: blur(3px); }
+  /* A plain flip — a compositor transform, so it costs nothing and works
+     everywhere. It mirrors YouTube's own controls too; taps still land
+     where you see them, since hit-testing runs through the transform. */
+  .tile.fx-mirror .player-view { transform: scaleX(-1); }
+  /* Real barrel distortion needs to move pixels around, which no built-in
+     filter function can do — only an SVG displacement map. That puts it in
+     the same reference-filter family as the colourblindness matrices, so
+     it is the one effect here that Android may refuse to render. */
+  .tile.fx-fisheye .player-view { filter: url(#fx-fisheye); }
   /* Chrome on Android hands playing video to a hardware overlay plane that
      is drawn past the compositor, so a filter on the page leaves the
      picture untouched. Sub-unit opacity forces the video back through
@@ -479,6 +488,19 @@
     </filter>
     <filter id="cb-tritan" color-interpolation-filters="sRGB">
       <feColorMatrix type="matrix" values="0.95 0.05 0 0 0  0 0.433 0.567 0 0  0 0.475 0.525 0 0  0 0 0 1 0"/>
+    </filter>
+    <!-- Barrel distortion: feDisplacementMap pushes each pixel along the
+         vector packed into the map's red (x) and green (y) channels. The
+         map itself is drawn on a canvas the first time the effect is used
+         — see buildFisheyeMap(). -->
+    <!-- primitiveUnits are bounding-box relative so the map stretches over
+         whatever size the tile happens to be, and the displacement scales
+         with it — the same lens on a small tile and a large one. -->
+    <filter id="fx-fisheye" x="0" y="0" width="100%" height="100%"
+            primitiveUnits="objectBoundingBox" color-interpolation-filters="sRGB">
+      <feImage id="fisheye-map" preserveAspectRatio="none" x="0" y="0" width="1" height="1" result="fmap"/>
+      <feDisplacementMap in="SourceGraphic" in2="fmap" scale="0.3"
+                         xChannelSelector="R" yChannelSelector="G"/>
     </filter>
   </defs>
 </svg>
@@ -777,13 +799,51 @@ var FX_MODES = [
   { cls: 'fx-sepia',   name: 'Vintage',     label: 'S' },
   { cls: 'fx-washed',  name: 'Washed out',  label: 'W' },
   { cls: 'fx-vhs',     name: 'VHS',         label: 'V' },
-  { cls: 'fx-frost',   name: 'Frosted',     label: 'F' }
+  { cls: 'fx-frost',   name: 'Frosted',     label: 'F' },
+  { cls: 'fx-mirror',  name: 'Mirror',      label: '⇄' },
+  { cls: 'fx-fisheye', name: 'Fisheye',     label: '◎' }
 ];
+
+// Displacement map for the fisheye filter: each pixel's red/green channels
+// carry how far to pull the sample toward or away from the centre, with 128
+// meaning "no shift". Built once, lazily — it costs a 128×128 loop.
+function buildFisheyeMap(size, strength) {
+  var c = document.createElement('canvas');
+  c.width = c.height = size;
+  var ctx = c.getContext('2d');
+  var img = ctx.createImageData(size, size);
+  for (var y = 0; y < size; y++) {
+    for (var x = 0; x < size; x++) {
+      var nx = (x / (size - 1)) * 2 - 1;   // -1..1 across the tile
+      var ny = (y / (size - 1)) * 2 - 1;
+      var r = Math.sqrt(nx * nx + ny * ny);
+      // sample from further out as you approach the edge, which magnifies
+      // the centre and squeezes the rim — the lens look
+      var f = (r > 0 && r < 1) ? (Math.pow(r, 1 + strength) - r) / r : 0;
+      var i = (y * size + x) * 4;
+      img.data[i]     = Math.max(0, Math.min(255, Math.round(128 + nx * f * 127)));
+      img.data[i + 1] = Math.max(0, Math.min(255, Math.round(128 + ny * f * 127)));
+      img.data[i + 2] = 128;
+      img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return c.toDataURL('image/png');
+}
+function ensureFisheyeMap() {
+  var el = document.getElementById('fisheye-map');
+  if (!el || el.getAttribute('href')) return;
+  var url = buildFisheyeMap(128, 1.1);
+  el.setAttribute('href', url);
+  // older engines only look at the namespaced attribute
+  el.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', url);
+}
 var fxMode = [];
 for (var fx = 0; fx < N_TILES; fx++) fxMode.push(0);
 
 function setFx(idx, mode) {
   var tile = tileEl(idx);
+  if (FX_MODES[mode].cls === 'fx-fisheye') ensureFisheyeMap();
   var prev = FX_MODES[fxMode[idx]].cls;
   if (prev) tile.classList.remove(prev);
   fxMode[idx] = mode;
